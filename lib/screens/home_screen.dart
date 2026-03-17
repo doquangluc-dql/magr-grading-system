@@ -261,7 +261,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text('Số câu hỏi: ${exam.questionIds.length}'),
-                    Text('Tạo ngày: ${exam.createdAt.day}/${exam.createdAt.month}/${exam.createdAt.year}'),
+                    Text('Tạo ngày: ${exam.createdAt.day.toString().padLeft(2, '0')}/${exam.createdAt.month.toString().padLeft(2, '0')}/${exam.createdAt.year} ${exam.createdAt.hour.toString().padLeft(2, '0')}:${exam.createdAt.minute.toString().padLeft(2, '0')}'),
                     const SizedBox(height: 16),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
@@ -352,7 +352,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
                 ),
                 subtitle: Text(
-                  'Tổng Điểm: $totalScore\nTạo ngày: ${question.createdAt.day}/${question.createdAt.month}/${question.createdAt.year}',
+                  'Tổng Điểm: $totalScore\nTạo ngày: ${question.createdAt.day.toString().padLeft(2, '0')}/${question.createdAt.month.toString().padLeft(2, '0')}/${question.createdAt.year} ${question.createdAt.hour.toString().padLeft(2, '0')}:${question.createdAt.minute.toString().padLeft(2, '0')}',
                 ),
                 trailing: const Icon(Icons.arrow_forward_ios),
                 onTap: () {
@@ -379,7 +379,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('MAGR - Hệ thống Chấm Thi'),
+        title: const Text('Hệ thống Chấm Thi'),
         backgroundColor: Colors.blueAccent,
         foregroundColor: Colors.white,
       ),

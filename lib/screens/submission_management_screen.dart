@@ -267,7 +267,7 @@ class _SubmissionManagementScreenState extends State<SubmissionManagementScreen>
                         overflow: TextOverflow.ellipsis,
                       ),
                       subtitle: Text(
-                        'Tải lên: ${s.createdAt.day}/${s.createdAt.month} ${s.createdAt.hour}:${s.createdAt.minute}',
+                        'Tải lên: ${s.createdAt.day.toString().padLeft(2, '0')}/${s.createdAt.month.toString().padLeft(2, '0')} ${s.createdAt.hour.toString().padLeft(2, '0')}:${s.createdAt.minute.toString().padLeft(2, '0')}',
                         style: const TextStyle(fontSize: 11, color: Colors.grey),
                       ),
                       trailing: IconButton(

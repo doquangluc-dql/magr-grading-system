@@ -43,6 +43,19 @@ class _BaremCreateScreenState extends State<BaremCreateScreen> {
     });
   }
 
+  // Hàm xóa bước
+  void removeStep(int index) {
+    if (steps.length > 1) {
+      setState(() {
+        steps.removeAt(index);
+      });
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Phải có ít nhất 1 bước giải!'))
+      );
+    }
+  }
+
   // Hàm để Lưu Barem đẩy lên Server
   void _saveBaremData() async {
     // Show loading
@@ -149,8 +162,18 @@ class _BaremCreateScreenState extends State<BaremCreateScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('Bước ${index + 1}', 
-                           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      Row(
+                        children: [
+                          Text('Bước ${index + 1}', 
+                               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          if (steps.length > 1)
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
+                              onPressed: () => removeStep(index),
+                              tooltip: 'Xóa bước này',
+                            ),
+                        ],
+                      ),
                       Row(
                         children: [
                           // Ô nhập Điểm MỚI
@@ -169,16 +192,6 @@ class _BaremCreateScreenState extends State<BaremCreateScreen> {
                                 steps[index].score = double.tryParse(value) ?? 0.0;
                               },
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          IconButton(
-                            icon: const Icon(Icons.camera_alt, color: Colors.blue),
-                            tooltip: 'Chụp/Tải ảnh gọi Gemini OCR',
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Tính năng OCR Gemini sẽ nằm ở đây!'))
-                              );
-                            },
                           ),
                         ],
                       )
