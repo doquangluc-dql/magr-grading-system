@@ -10,8 +10,8 @@ import '../models/grading_batch.dart';
 class DatabaseApi {
   // --- CONFIGURATION ---
   // Dùng localhost khi đang phát triển để test nhanh code mới
-  static const String _baseUrl = "http://localhost:3000"; 
-  // static const String _baseUrl = "https://magr-grading-system.onrender.com"; 
+  // static const String _baseUrl = "http://localhost:3000"; 
+  static const String _baseUrl = "https://magr-grading-system.onrender.com"; 
   static const String _dataSource = "Cluster0";
   static const String _database = "magr_db";
 
