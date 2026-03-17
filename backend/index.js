@@ -1,6 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const { MongoClient, ObjectId } = require('mongodb');
+const axios = require('axios');
+const FormData = require('form-data');
 require('dotenv').config();
 
 const app = express();
@@ -33,6 +35,232 @@ function cleanDoc(doc) {
   }
   return doc;
 }
+
+// --- NEW: Global Grading Queue ---
+let gradingQueue = [];
+let isProcessingQueue = false;
+
+async function addToGradingQueue(batchId, submissionIds, webhookUrl, commonMetadata) {
+  // Thêm tất cả bài làm của Batch vào hàng đợi chung
+  for (const subId of submissionIds) {
+    gradingQueue.push({
+      batchId,
+      subId,
+      webhookUrl,
+      commonMetadata
+    });
+  }
+  
+  console.log(`\x1b[35m[Queue]\x1b[0m Đã thêm ${submissionIds.length} bài vào hàng đợi. Tổng cộng: ${gradingQueue.length} bài.`);
+  
+  if (!isProcessingQueue) {
+    processGlobalQueue();
+  }
+}
+
+async function processGlobalQueue() {
+  if (gradingQueue.length === 0) {
+    isProcessingQueue = false;
+    console.log(`\x1b[35m[Queue]\x1b[0m Hàng đợi đã trống.`);
+    return;
+  }
+
+  isProcessingQueue = true;
+  const task = gradingQueue.shift();
+  const { batchId, subId, webhookUrl, commonMetadata } = task;
+
+  const subCol = db.collection('submissions');
+  const sessionCol = db.collection('gradings');
+  const batchCol = db.collection('grading_batches');
+
+  let isSuccess = false;
+  let studentDisplayName = "Ẩn danh";
+  let batchSheetUrl = commonMetadata?.googleSheetId ? `https://docs.google.com/spreadsheets/d/${commonMetadata.googleSheetId}` : null;
+
+  try {
+    const sub = await subCol.findOne({ _id: new ObjectId(subId) });
+    if (!sub) {
+      console.error(`  [!] Không tìm thấy bài nộp ID: ${subId}`);
+    } else {
+      studentDisplayName = sub.studentName;
+      console.log(`\x1b[33m[Processing]\x1b[0m [Batch ${batchId}] Đang chấm: ${studentDisplayName}... (${gradingQueue.length} bài còn lại)`);
+
+      const form = new FormData();
+      const sessionMetadata = { ...commonMetadata, studentName: sub.studentName };
+      
+      form.append('data', Buffer.from(JSON.stringify(sessionMetadata)), {
+        filename: 'data.json',
+        contentType: 'application/json'
+      });
+
+      let base64Str = sub.imageBase64 || "";
+      if (base64Str.includes(',')) base64Str = base64Str.split(',')[1];
+      const imageBuffer = Buffer.from(base64Str, 'base64');
+      
+      form.append('studentImage', imageBuffer, {
+        filename: `${sub.studentName}.jpg`,
+        contentType: 'image/jpeg'
+      });
+
+      const response = await axios.post(webhookUrl, form, {
+        headers: form.getHeaders(),
+        timeout: 120000 
+      });
+
+      const n8nData = response.data;
+      if (!n8nData.error) {
+        isSuccess = true;
+        if (n8nData.sheetUrl) batchSheetUrl = n8nData.sheetUrl;
+      }
+
+      await sessionCol.updateOne(
+        { batchId: batchId.toString(), studentName: sub.studentName },
+        {
+          $set: {
+            n8nStatus: isSuccess ? 'Success' : 'Failed',
+            score: n8nData.score,
+            sheetUrl: n8nData.sheetUrl,
+            errorDetails: n8nData.error || (isSuccess ? null : "Lỗi từ n8n"),
+            updatedAt: new Date()
+          }
+        }
+      );
+    }
+  } catch (error) {
+    const errorMessage = error.response ? `N8N Error ${error.response.status}: ${JSON.stringify(error.response.data)}` : error.message;
+    console.error(`    [XO] Lỗi chấm bài ${studentDisplayName}:`, errorMessage);
+    
+    await sessionCol.updateOne(
+      { batchId: batchId.toString(), studentName: studentDisplayName },
+      {
+        $set: {
+          n8nStatus: 'Failed',
+          errorDetails: errorMessage,
+          updatedAt: new Date()
+        }
+      }
+    );
+    isSuccess = false;
+  } finally {
+    // Cập nhật tiến độ Batch
+    await batchCol.updateOne(
+      { _id: new ObjectId(batchId) },
+      { 
+        $inc: { 
+          completedItems: isSuccess ? 1 : 0,
+          failedItems: isSuccess ? 0 : 1 
+        },
+        $set: { sheetUrl: batchSheetUrl }
+      }
+    );
+
+    // Kiểm tra xem Batch này đã hoàn thành chưa
+    const updatedBatch = await batchCol.findOne({ _id: new ObjectId(batchId) });
+    if (updatedBatch && (updatedBatch.completedItems + updatedBatch.failedItems) >= updatedBatch.totalItems) {
+      await batchCol.updateOne(
+        { _id: new ObjectId(batchId) },
+        { $set: { status: 'Completed', updatedAt: new Date() } }
+      );
+      console.log(`\x1b[32m[Batch ${batchId}]\x1b[0m Đã hoàn thành toàn bộ đợt chấm.`);
+      
+      // --- GỬI THÔNG BÁO HOÀN TẤT CHO GIÁO VIÊN (ĐỂ GỬI MAIL) ---
+      try {
+        const notifyUrl = webhookUrl.replace('magr-grading-webhook', 'magr-teacher-notification');
+        await axios.post(notifyUrl, {
+          event: 'GRADING_COMPLETED',
+          receiver: 'TEACHER',
+          batchId: batchId.toString(),
+          batchName: updatedBatch.batchName,
+          examInfo: {
+            title: updatedBatch.examTitle,
+            question: updatedBatch.questionTitle,
+            examId: updatedBatch.examId
+          },
+          statistics: {
+            total: updatedBatch.totalItems,
+            success: updatedBatch.completedItems,
+            failed: updatedBatch.failedItems
+          },
+          resultsUrl: batchSheetUrl,
+          timestamp: new Date().toISOString()
+        });
+        console.log(`\x1b[32m[Teacher Notify]\x1b[0m Đã gửi báo cáo đợt chấm sang n8n (magr-teacher-notification).`);
+      } catch (notifyError) {
+        console.error(`\x1b[31m[Teacher Notify Error]\x1b[0m Thất bại khi gửi báo cáo:`, notifyError.message);
+      }
+    }
+
+    // Tiếp tục xử lý bài tiếp theo trong hàng đợi
+    processGlobalQueue();
+  }
+}
+
+// --- NEW: Background Grading Batch ---
+
+app.post('/api/grading/start-batch', async (req, res) => {
+  const { examId, questionId, examTitle, questionTitle, submissionIds, webhookUrl, metadata, batchName } = req.body;
+
+  if (!db) return res.status(503).json({ error: "Database not connected" });
+
+  try {
+    const batchCol = db.collection('grading_batches');
+    
+    // Automatic naming if empty
+    let finalBatchName = (batchName || `${examTitle} - ${questionTitle}`).trim();
+    
+    // Unique naming logic (incrementing numbers if name exists)
+    let uniqueName = finalBatchName;
+    let counter = 1;
+    while (await batchCol.findOne({ batchName: uniqueName, examId: examId, questionId: questionId })) {
+      uniqueName = `${finalBatchName} (${counter++})`;
+    }
+
+    const batch = {
+      batchName: uniqueName,
+      examId,
+      questionId,
+      examTitle,
+      questionTitle,
+      totalItems: submissionIds.length,
+      completedItems: 0,
+      failedItems: 0,
+      status: 'Processing',
+      sheetUrl: metadata?.googleSheetId ? `https://docs.google.com/spreadsheets/d/${metadata.googleSheetId}` : null,
+      createdAt: new Date()
+    };
+    
+    const batchResult = await batchCol.insertOne(batch);
+    const batchId = batchResult.insertedId;
+
+    // --- TỐI ƯU HÓA: LẤY TẤT CẢ SUBMISSIONS TRONG 1 LẦN ---
+    const subs = await db.collection('submissions').find({ 
+      _id: { $in: submissionIds.map(id => new ObjectId(id)) } 
+    }).toArray();
+
+    const pendingSessions = subs.map(sub => ({
+      batchId: batchId.toString(),
+      submissionId: sub._id.toString(),
+      studentName: sub.studentName,
+      studentImageBase64: sub.imageBase64,
+      examId: sub.examId,
+      questionId: sub.questionId,
+      n8nStatus: 'Pending',
+      createdAt: new Date()
+    }));
+
+    if (pendingSessions.length > 0) {
+      await db.collection('gradings').insertMany(pendingSessions);
+    }
+
+    res.json({ batchId: batchId.toString() });
+
+    addToGradingQueue(batchId, submissionIds, webhookUrl, metadata);
+
+  } catch (e) {
+    console.error("Failed to start batch:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // Data API Action simulator
 app.post('/action/:action', async (req, res) => {
