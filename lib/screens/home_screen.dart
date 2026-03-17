@@ -7,6 +7,7 @@ import 'exam_detail_screen.dart';
 import 'question_detail_screen.dart';
 import 'grading_session_screen.dart';
 import 'submission_management_screen.dart';
+import 'grading_history_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -16,7 +17,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  int _currentIndex = 0; // Default to 'Kỳ Thi' tab
+  int _currentIndex = 0; // 0: Kỳ Thi, 1: Kho Bài Thi, 2: Lịch sử chấm
   final TextEditingController _titleController = TextEditingController();
   late Future<List<Question>> _questionsFuture;
   late Future<List<Exam>> _examsFuture;
@@ -375,30 +376,48 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _buildBody() {
+    switch (_currentIndex) {
+      case 0: return _buildExamsTab();
+      case 1: return _buildQuestionBankTab();
+      case 2: return const GradingHistoryScreen();
+      default: return _buildExamsTab();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Hệ thống Chấm Thi'),
-        backgroundColor: Colors.blueAccent,
+        title: Text(_currentIndex == 0 
+          ? 'Kỳ Thi' 
+          : _currentIndex == 1 ? 'Kho Bài Thi' : 'Lịch Sử Chấm'),
+        backgroundColor: _currentIndex == 0 
+          ? Colors.deepPurpleAccent 
+          : _currentIndex == 1 ? Colors.blueAccent : Colors.indigo,
         foregroundColor: Colors.white,
       ),
-      body: _currentIndex == 0 ? _buildExamsTab() : _buildQuestionBankTab(),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _currentIndex == 0 ? _showCreateExamDialog : _showCreateQuestionDialog,
-        icon: const Icon(Icons.add),
-        label: Text(_currentIndex == 0 ? 'Thêm Kì Thi' : 'Thêm Câu Hỏi'),
-        backgroundColor: _currentIndex == 0 ? Colors.deepPurpleAccent : Colors.blueAccent,
-        foregroundColor: Colors.white,
-      ),
+      body: _buildBody(),
+      floatingActionButton: _currentIndex != 2 
+        ? FloatingActionButton.extended(
+            onPressed: _currentIndex == 0 ? _showCreateExamDialog : _showCreateQuestionDialog,
+            icon: const Icon(Icons.add),
+            label: Text(_currentIndex == 0 ? 'Thêm Kì Thi' : 'Thêm Câu Hỏi'),
+            backgroundColor: _currentIndex == 0 ? Colors.deepPurpleAccent : Colors.blueAccent,
+            foregroundColor: Colors.white,
+          )
+        : null,
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        selectedItemColor: _currentIndex == 0 ? Colors.deepPurpleAccent : Colors.blueAccent,
+        type: BottomNavigationBarType.fixed,
+        selectedItemColor: _currentIndex == 0 
+          ? Colors.deepPurpleAccent 
+          : _currentIndex == 1 ? Colors.blueAccent : Colors.indigo,
         onTap: (index) {
           setState(() {
             _currentIndex = index;
-            _loadExams();
-            _loadQuestions();
+            if (index == 0) _loadExams();
+            if (index == 1) _loadQuestions();
           });
         },
         items: const [
@@ -409,6 +428,10 @@ class _HomeScreenState extends State<HomeScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.library_books),
             label: 'Kho Bài Thi',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.history),
+            label: 'Lịch sử chấm',
           ),
         ],
       ),

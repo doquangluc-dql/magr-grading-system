@@ -5,12 +5,13 @@ import '../models/exam.dart';
 import '../models/barem_step.dart';
 import '../models/grading_session.dart';
 import '../models/student_submission.dart';
+import '../models/grading_batch.dart';
 
 class DatabaseApi {
   // --- CONFIGURATION ---
-  // Khi chạy local, backend mặc định là localhost:3000
-  // Khi deploy (Vercel/Render), bạn hãy thay URL này bằng URL của backend mới
-  static const String _baseUrl = "https://magr-grading-system.onrender.com"; 
+  // Dùng localhost khi đang phát triển để test nhanh code mới
+  static const String _baseUrl = "http://localhost:3000"; 
+  // static const String _baseUrl = "https://magr-grading-system.onrender.com"; 
   static const String _dataSource = "Cluster0";
   static const String _database = "magr_db";
 
@@ -379,6 +380,70 @@ class DatabaseApi {
       _gradingsCache.remove("${session.examId}_all");
     } catch (e) {
       print("Error inserting grading session: $e");
+    }
+  }
+
+  // --- GRADING BATCHES APIs ---
+
+  static Future<String?> startGradingBatch({
+    required String examId,
+    required String questionId,
+    required String examTitle,
+    required String questionTitle,
+    required List<String> submissionIds,
+    required String webhookUrl,
+    required Map<String, dynamic> metadata,
+    String? batchName,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse("$_baseUrl/api/grading/start-batch"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "examId": examId,
+          "questionId": questionId,
+          "examTitle": examTitle,
+          "questionTitle": questionTitle,
+          "submissionIds": submissionIds,
+          "webhookUrl": webhookUrl,
+          "metadata": metadata,
+          "batchName": batchName,
+        }),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['batchId'];
+      }
+    } catch (e) {
+      print("Error starting grading batch: $e");
+    }
+    return null;
+  }
+
+  static Future<List<GradingBatch>> getGradingBatches() async {
+    try {
+      final res = await _query("find", "grading_batches", {
+        "sort": {"createdAt": -1}
+      });
+      final List documents = res['documents'] ?? [];
+      return documents.map((doc) => GradingBatch.fromJson(_cleanDoc(doc))).toList();
+    } catch (e) {
+      print("Error fetching grading batches: $e");
+      return [];
+    }
+  }
+
+  static Future<List<GradingSession>> getSessionsForBatch(String batchId) async {
+    try {
+      final res = await _query("find", "gradings", {
+        "filter": {"batchId": batchId},
+        "sort": {"createdAt": -1}
+      });
+      final List documents = res['documents'] ?? [];
+      return documents.map((doc) => GradingSession.fromJson(_cleanDoc(doc))).toList();
+    } catch (e) {
+      print("Error fetching cache for batch: $e");
+      return [];
     }
   }
 }

@@ -11,6 +11,7 @@ import '../models/grading_session.dart';
 import '../models/student_submission.dart';
 import '../services/database_api.dart';
 import 'submission_management_screen.dart';
+import 'grading_history_screen.dart';
 
 class QuestionGradingScreen extends StatefulWidget {
   final Exam exam;
@@ -31,6 +32,7 @@ class _GradableSubmission {
   String status; // 'Pending', 'Uploading', 'Success', 'Failed'
   String? error;
   String? sheetUrl;
+  double? score; // NEW: to display score in the UI
   bool isSelected;
 
   _GradableSubmission({
@@ -65,6 +67,7 @@ class _QuestionGradingScreenState extends State<QuestionGradingScreen> {
   }
 
   Future<void> _loadSubmissions({bool forceRefresh = false}) async {
+    if (!mounted) return;
     setState(() {
       _isLoadingSubmissions = true;
     });
@@ -73,17 +76,43 @@ class _QuestionGradingScreenState extends State<QuestionGradingScreen> {
         widget.exam.id,
         questionId: widget.question.id,
         searchTerm: _searchController.text.trim(),
-        includeImage: false, // Enable caching & high performance
+        includeImage: false, // Metadata only
         forceRefresh: forceRefresh,
       );
+      
+      if (!mounted) return;
       setState(() {
         _gradableItems.clear();
         _gradableItems.addAll(subs.map((s) => _GradableSubmission(submission: s)));
-      });
-    } finally {
-      setState(() {
         _isLoadingSubmissions = false;
       });
+
+      // Now start loading images in the background
+      _loadImagesInBackground();
+    } catch (e) {
+      if (mounted) setState(() => _isLoadingSubmissions = false);
+    }
+  }
+
+  Future<void> _loadImagesInBackground() async {
+    // Only load images for items that are missing them
+    for (var item in _gradableItems) {
+      if (!mounted) return;
+      if (item.submission.imageBase64.isEmpty) {
+        try {
+          final fullSub = await DatabaseApi.getStudentSubmissionById(item.submission.id);
+          if (fullSub != null && mounted) {
+            setState(() {
+              // Update the submission object within the item
+              item.submission.imageBase64 = fullSub.imageBase64;
+            });
+          }
+        } catch (e) {
+          print("Error lazy loading image: $e");
+        }
+        // Small delay to avoid hammering the API too hard
+        await Future.delayed(const Duration(milliseconds: 50));
+      }
     }
   }
 
@@ -98,130 +127,128 @@ class _QuestionGradingScreenState extends State<QuestionGradingScreen> {
   }
 
 
-  Future<void> _processSelected() async {
+  void _showBatchNameDialog() {
+    final selectedCount = _gradableItems.where((item) => item.isSelected).length;
+    if (selectedCount == 0) return;
+
+    final controller = TextEditingController(text: "${widget.exam.title} - ${widget.question.title}");
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Tên đợt chấm bài'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Bạn đã chọn $selectedCount bài để chấm.', style: const TextStyle(fontSize: 13, color: Colors.grey)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                labelText: 'Tên gợi nhớ (Ví dụ: Chấm lần 1)',
+                border: OutlineInputBorder(),
+              ),
+              autofocus: true,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Hủy')),
+          ElevatedButton(
+            onPressed: () {
+              final name = controller.text.trim();
+              Navigator.pop(context);
+              _processSelected(batchName: name.isNotEmpty ? name : null);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, foregroundColor: Colors.white),
+            child: const Text('BẮT ĐẦU CHẤM'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _processSelected({String? batchName}) async {
     if (_isProcessing) return;
 
-    final selectedItems = _gradableItems.where((item) => item.isSelected && item.status != 'Success').toList();
+    final selectedItems = _gradableItems.where((item) => item.isSelected).toList();
     if (selectedItems.isEmpty) return;
 
     setState(() {
       _isProcessing = true;
     });
 
-    for (var item in selectedItems) {
-      if (!mounted) break;
-      setState(() {
-        item.status = 'Uploading';
-        _processingStudentName = item.submission.studentName;
-      });
+    try {
+      final submissionIds = selectedItems.map((i) => i.submission.id).toList();
 
-      try {
-        var request = http.MultipartRequest('POST', Uri.parse(_n8nWebhookUrl));
-        // Gather ALL metadata into a single object to prevent n8n from creating multiple binary files for Unicode fields
-        final metadata = {
-          'examId': widget.exam.id,
-          'examTitle': widget.exam.title,
-          'questionId': widget.question.id,
-          'questionTitle': widget.question.title,
-          'questionContent': widget.question.content ?? "",
-          'googleSheetId': widget.exam.googleSheetId, // Pass the sheet ID
-          'studentName': item.submission.studentName,
-          'barem': widget.question.steps.asMap().entries.map((entry) {
-            final index = entry.key;
-            final step = entry.value;
-            return {
-              'step_id': index + 1,
-              'content': step.latexCode,
-              'score': step.score,
-            };
-          }).toList(),
-        };
-        
-        request.fields['data'] = jsonEncode(metadata);
+      final metadata = {
+        'examId': widget.exam.id,
+        'examTitle': widget.exam.title,
+        'questionId': widget.question.id,
+        'questionTitle': widget.question.title,
+        'questionContent': widget.question.content ?? "",
+        'googleSheetId': widget.exam.googleSheetId,
+        'barem': widget.question.steps.asMap().entries.map((entry) {
+          final index = entry.key;
+          final step = entry.value;
+          return {
+            'step_id': index + 1,
+            'content': step.latexCode,
+            'score': step.score,
+          };
+        }).toList(),
+      };
 
-        // Optimization check: If image is missing (lazy loaded), fetch it now
-        String imageBase64 = item.submission.imageBase64;
-        if (imageBase64.isEmpty) {
-          final fullSub = await DatabaseApi.getStudentSubmissionById(item.submission.id);
-          if (fullSub != null && fullSub.imageBase64.isNotEmpty) {
-            imageBase64 = fullSub.imageBase64;
-          } else {
-             throw Exception("Không thể tải ảnh bài làm");
-          }
-        }
+      final batchId = await DatabaseApi.startGradingBatch(
+        examId: widget.exam.id,
+        questionId: widget.question.id,
+        examTitle: widget.exam.title,
+        questionTitle: widget.question.title,
+        submissionIds: submissionIds,
+        webhookUrl: _n8nWebhookUrl,
+        metadata: metadata,
+        batchName: batchName,
+      );
 
-        Uint8List imageBytes = base64Decode(imageBase64);
-        var multipartFile = http.MultipartFile.fromBytes(
-          'studentImage',
-          imageBytes,
-          filename: '${item.submission.studentName}.jpg',
-          contentType: MediaType('image', 'jpeg'),
-        );
-        request.files.add(multipartFile);
-
-        var streamedResponse = await request.send();
-        var response = await http.Response.fromStream(streamedResponse);
-
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          item.sheetUrl = data['sheetUrl'];
-          item.status = 'Success';
-          
-          // Parse score and feedback if available
-          final double? score = data['score'] != null ? (data['score'] as num).toDouble() : null;
-          final String? feedback = data['feedback'];
-
-          final session = GradingSession(
-            id: '',
-            examId: widget.exam.id,
-            questionId: widget.question.id,
-            studentName: item.submission.studentName,
-            createdAt: DateTime.now(),
-            n8nStatus: 'Success',
-            sheetUrl: item.sheetUrl,
-            studentImageBase64: item.submission.imageBase64,
-            score: score,
-            feedback: feedback,
+      if (batchId != null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Hệ thống đã nhận bài và đang chấm trong nền. Đang chuyển đến trang theo dõi...'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
           );
-          await DatabaseApi.insertGradingSession(session);
-        } else {
-          item.status = 'Failed';
-          String detailedError = 'Lỗi server: ${response.statusCode}';
-          try {
-            final errorData = jsonDecode(response.body);
-            if (errorData['error'] != null) {
-              detailedError = errorData['error'];
-            }
-          } catch (_) {}
-          
-          item.error = detailedError;
-          
-          final session = GradingSession(
-            id: '',
-            examId: widget.exam.id,
-            questionId: widget.question.id,
-            studentName: item.submission.studentName,
-            createdAt: DateTime.now(),
-            n8nStatus: 'Failed',
-            studentImageBase64: item.submission.imageBase64,
-            errorDetails: detailedError, // Save detail
+
+          // Auto-navigate to detail screen
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => GradingBatchDetailScreen(
+                batchId: batchId,
+                batchTitle: batchName ?? "${widget.exam.title} - ${widget.question.title}",
+              ),
+            ),
           );
-          await DatabaseApi.insertGradingSession(session);
         }
-      } catch (e) {
-        item.status = 'Failed';
-        item.error = e.toString();
+      } else {
+        throw Exception("Không thể bắt đầu chấm bài.");
       }
-      
-      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Lỗi: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _isSelectionMode = false;
+        });
+        _loadAll(); // Optional: refresh metadata
+      }
     }
-
-    setState(() {
-      _isProcessing = false;
-      _processingStudentName = null;
-      _isSelectionMode = false; // Exit selection mode after done
-    });
-    _loadHistory(); // Refresh history backgroundly
   }
 
   // --- VAULT FEATURES MERGED ---
@@ -382,6 +409,35 @@ class _QuestionGradingScreenState extends State<QuestionGradingScreen> {
       body: Column(
         children: [
           if (_isUploading) const LinearProgressIndicator(),
+          if (_isProcessing && _processingStudentName != null)
+            Container(
+              padding: const EdgeInsets.all(12),
+              color: Colors.indigo.shade900,
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 24, height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'HỆ THỐNG ĐANG CHẤM BÀI',
+                          style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                        ),
+                        Text(
+                          'Đang xử lý: $_processingStudentName',
+                          style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Expanded(
             child: Container(
               margin: const EdgeInsets.all(12),
@@ -524,7 +580,10 @@ class _QuestionGradingScreenState extends State<QuestionGradingScreen> {
                                               ),
                                             )
                                           else
-                                            const Icon(Icons.image_outlined, size: 24, color: Colors.indigo),
+                                            const SizedBox(
+                                              width: 20, height: 20,
+                                              child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.indigo),
+                                            ),
                                           
                                           if (isCurrent)
                                             Container(
@@ -556,6 +615,34 @@ class _QuestionGradingScreenState extends State<QuestionGradingScreen> {
                                   : Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
+                                        // Status Indicator
+                                        if (item.status == 'Success')
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: Colors.green.shade50,
+                                              borderRadius: BorderRadius.circular(12),
+                                              border: Border.all(color: Colors.green.shade200),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(Icons.check_circle, size: 12, color: Colors.green),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  item.score != null ? '${item.score} đ' : 'Đã chấm',
+                                                  style: const TextStyle(fontSize: 11, color: Colors.green, fontWeight: FontWeight.bold),
+                                                ),
+                                              ],
+                                            ),
+                                          )
+                                        else if (item.status == 'Failed')
+                                          const Tooltip(
+                                            message: 'Chấm thất bại',
+                                            child: Icon(Icons.error_outline, color: Colors.red, size: 20),
+                                          ),
+                                          
+                                        const SizedBox(width: 4),
                                         IconButton(
                                           icon: const Icon(Icons.edit_outlined, size: 18, color: Colors.blue),
                                           onPressed: () => _showRenameDialog(item.submission),
@@ -603,7 +690,7 @@ class _QuestionGradingScreenState extends State<QuestionGradingScreen> {
                                 child: ElevatedButton.icon(
                                   icon: const Icon(Icons.play_arrow),
                                   label: const Text('BẮT ĐẦU CHẤM'),
-                                  onPressed: _gradableItems.any((i) => i.isSelected) ? _processSelected : null,
+                                  onPressed: _gradableItems.any((i) => i.isSelected) ? _showBatchNameDialog : null,
                                   style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, foregroundColor: Colors.white),
                                 ),
                               ),

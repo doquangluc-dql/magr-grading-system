@@ -25,21 +25,35 @@ class GradingSession {
     this.feedback,
   });
 
+  static String _parseId(dynamic val) {
+    if (val is String) return val;
+    if (val is Map && val.containsKey('\$oid')) return val['\$oid'].toString();
+    return val?.toString() ?? '';
+  }
+
   factory GradingSession.fromJson(Map<String, dynamic> json) {
+    DateTime parseDate(dynamic d) {
+      if (d == null) return DateTime.now();
+      if (d is DateTime) return d;
+      try {
+        return DateTime.parse(d.toString());
+      } catch (_) {
+        return DateTime.now();
+      }
+    }
+
     return GradingSession(
-      id: json['_id']?.toString() ?? '',
-      examId: json['examId'] as String,
-      questionId: json['questionId'] as String?,
-      studentName: json['studentName'] as String,
-      createdAt: json['createdAt'] is DateTime
-          ? json['createdAt']
-          : DateTime.parse(json['createdAt'].toString()),
-      n8nStatus: json['n8nStatus'] as String? ?? 'Pending',
-      sheetUrl: json['sheetUrl'] as String?,
-      studentImageBase64: json['studentImageBase64'] as String?,
-      errorDetails: json['errorDetails'] as String?,
+      id: _parseId(json['_id']),
+      examId: _parseId(json['examId']),
+      questionId: json['questionId'] != null ? _parseId(json['questionId']) : null,
+      studentName: json['studentName']?.toString() ?? 'Ẩn danh',
+      createdAt: parseDate(json['createdAt']),
+      n8nStatus: (json['n8nStatus'] ?? 'Pending').toString(),
+      sheetUrl: json['sheetUrl']?.toString(),
+      studentImageBase64: json['studentImageBase64']?.toString(),
+      errorDetails: json['errorDetails']?.toString(),
       score: json['score'] != null ? (json['score'] as num).toDouble() : null,
-      feedback: json['feedback'] as String?,
+      feedback: json['feedback']?.toString(),
     );
   }
 

@@ -205,7 +205,7 @@ class _SubmissionManagementScreenState extends State<SubmissionManagementScreen>
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Kho: ${widget.question.title}'),
+            Text('${widget.question.title}'),
             Text(widget.exam.title, style: const TextStyle(fontSize: 12, color: Colors.white70)),
           ],
         ),
