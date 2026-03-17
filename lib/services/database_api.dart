@@ -10,7 +10,7 @@ class DatabaseApi {
   // --- CONFIGURATION ---
   // Khi chạy local, backend mặc định là localhost:3000
   // Khi deploy (Vercel/Render), bạn hãy thay URL này bằng URL của backend mới
-  static const String _baseUrl = "https://magr-grading-system.onrender.com/"; 
+  static const String _baseUrl = "https://magr-grading-system.onrender.com"; 
   static const String _dataSource = "Cluster0";
   static const String _database = "magr_db";
 
