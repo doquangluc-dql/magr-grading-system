@@ -202,7 +202,7 @@ class _BaremCreateScreenState extends State<BaremCreateScreen> {
                           maxLines: 4,
                           decoration: InputDecoration(
                             border: const OutlineInputBorder(),
-                            hintText: 'Học sinh giải hệ được $x = 2, y = 3$',
+                            hintText: r'Học sinh giải hệ được $x = 2, y = 3$',
                             filled: true,
                             fillColor: Colors.grey.shade50,
                           ),
