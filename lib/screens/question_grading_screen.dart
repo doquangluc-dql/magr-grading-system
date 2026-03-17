@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../models/exam.dart';
 import '../models/question.dart';
@@ -44,7 +45,10 @@ class _QuestionGradingScreenState extends State<QuestionGradingScreen> {
   late Future<List<GradingSession>> _historyFuture;
   bool _isLoadingSubmissions = false;
   bool _isProcessing = false;
-  String? _processingStudentName; // NEW
+  bool _isSelectionMode = false; // NEW: Toggle between Vault View and Selection Mode
+  bool _isUploading = false; // NEW: For image picking
+  final ImagePicker _picker = ImagePicker(); // NEW: For image picking
+  String? _processingStudentName;
   final TextEditingController _searchController = TextEditingController();
 
   final String _n8nWebhookUrl = 'https://doquangluc-dql.app.n8n.cloud/webhook/magr-grading-webhook';
@@ -215,8 +219,144 @@ class _QuestionGradingScreenState extends State<QuestionGradingScreen> {
     setState(() {
       _isProcessing = false;
       _processingStudentName = null;
+      _isSelectionMode = false; // Exit selection mode after done
     });
     _loadHistory(); // Refresh history backgroundly
+  }
+
+  // --- VAULT FEATURES MERGED ---
+
+  Future<void> _pickAndUploadImages() async {
+    final List<XFile> images = await _picker.pickMultiImage();
+    if (images.isEmpty) return;
+
+    setState(() => _isUploading = true);
+
+    try {
+      for (var image in images) {
+        Uint8List bytes = await image.readAsBytes();
+        String base64 = base64Encode(bytes);
+        
+        final submission = StudentSubmission(
+          id: '',
+          examId: widget.exam.id,
+          questionId: widget.question.id,
+          studentName: image.name,
+          imageBase64: base64,
+          createdAt: DateTime.now(),
+        );
+        
+        await DatabaseApi.insertStudentSubmission(submission);
+      }
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Đã tải lên ${images.length} bài làm!'), backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Lỗi tải ảnh: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isUploading = false);
+        _loadSubmissions(forceRefresh: true);
+      }
+    }
+  }
+
+  void _confirmDelete(StudentSubmission sub) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Xác nhận xóa'),
+        content: Text('Bạn có chắc muốn xóa bài làm "${sub.studentName}"?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await DatabaseApi.deleteStudentSubmission(sub.id);
+              _loadSubmissions(forceRefresh: true);
+            }, 
+            child: const Text('Xóa', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showRenameDialog(StudentSubmission sub) {
+    final controller = TextEditingController(text: sub.studentName);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Đổi tên bài làm / MSSV'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Tên mới / MSSV', border: OutlineInputBorder()),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
+          ElevatedButton(
+            onPressed: () async {
+              final newName = controller.text.trim();
+              if (newName.isNotEmpty) {
+                Navigator.pop(ctx);
+                await DatabaseApi.updateStudentSubmissionName(sub.id, newName);
+                _loadSubmissions(forceRefresh: true);
+              }
+            },
+            child: const Text('Lưu'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showFullImage(StudentSubmission sub) async {
+    showDialog(context: context, barrierDismissible: false, builder: (ctx) => const Center(child: CircularProgressIndicator()));
+
+    try {
+      final fullSub = await DatabaseApi.getStudentSubmissionById(sub.id);
+      Navigator.pop(context); // Remove loading
+
+      if (fullSub == null || fullSub.imageBase64.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Không thể tải ảnh'), backgroundColor: Colors.red));
+        return;
+      }
+
+      showDialog(
+        context: context,
+        builder: (ctx) => Dialog.fullscreen(
+          child: Container(
+            color: Colors.black,
+            child: Column(
+              children: [
+                AppBar(
+                  backgroundColor: Colors.transparent,
+                  foregroundColor: Colors.white,
+                  title: Text(fullSub.studentName),
+                  leading: IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
+                ),
+                Expanded(
+                  child: InteractiveViewer(
+                    child: Image.memory(base64Decode(fullSub.imageBase64), fit: BoxFit.contain),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    } catch (e) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi: $e'), backgroundColor: Colors.red));
+    }
   }
 
   @override
@@ -241,7 +381,7 @@ class _QuestionGradingScreenState extends State<QuestionGradingScreen> {
       ),
       body: Column(
         children: [
-          // Submissions Selection Area
+          if (_isUploading) const LinearProgressIndicator(),
           Expanded(
             child: Container(
               margin: const EdgeInsets.all(12),
@@ -253,68 +393,76 @@ class _QuestionGradingScreenState extends State<QuestionGradingScreen> {
               ),
               child: Column(
                 children: [
-                   // Search Bar for repository
+                  // Toolbar
                   Padding(
                     padding: const EdgeInsets.all(8.0),
-                    child: TextField(
-                      controller: _searchController,
-                      decoration: InputDecoration(
-                        hintText: 'Tìm học sinh...',
-                        prefixIcon: const Icon(Icons.search, size: 20),
-                        suffixIcon: IconButton(
-                          icon: const Icon(Icons.clear, size: 20),
-                          onPressed: () {
-                            _searchController.clear();
-                            _loadSubmissions();
-                          },
-                        ),
-                        isDense: true,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      onSubmitted: (_) => _loadSubmissions(),
-                    ),
-                  ),
-                  const Divider(height: 1),
-                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                         Column(
-                           crossAxisAlignment: CrossAxisAlignment.start,
-                           children: [
-                             Text('Kho bài làm riêng của câu: ${widget.question.title}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                             Text('Số bài đã chọn: ${_gradableItems.where((i)=>i.isSelected).length}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                           ],
-                         ),
                         Row(
                           children: [
-                            TextButton(
-                              onPressed: () => setState(() {
-                                 final allSelected = _gradableItems.every((i) => i.isSelected);
-                                 for(var i in _gradableItems) i.isSelected = !allSelected;
-                              }),
-                              child: const Text('Tất cả'),
+                            Expanded(
+                              child: TextField(
+                                controller: _searchController,
+                                decoration: InputDecoration(
+                                  hintText: 'Tìm học sinh...',
+                                  prefixIcon: const Icon(Icons.search, size: 20),
+                                  suffixIcon: _searchController.text.isNotEmpty 
+                                    ? IconButton(
+                                        icon: const Icon(Icons.clear, size: 20),
+                                        onPressed: () {
+                                          _searchController.clear();
+                                          _loadSubmissions();
+                                        },
+                                      )
+                                    : null,
+                                  isDense: true,
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                                onSubmitted: (_) => _loadSubmissions(),
+                              ),
                             ),
-                            IconButton(
-                              icon: const Icon(Icons.add_photo_alternate_outlined, color: Colors.indigo),
-                              onPressed: () {
-                                Navigator.push(
-                                  context, 
-                                  MaterialPageRoute(builder: (ctx) => SubmissionManagementScreen(
-                                    exam: widget.exam,
-                                    question: widget.question,
-                                  ))
-                                ).then((_) => _loadSubmissions());
-                              },
-                              tooltip: 'Thêm bài làm mới vào kho',
-                            )
+                            if (!_isSelectionMode && !_isProcessing)
+                              IconButton(
+                                icon: const Icon(Icons.add_photo_alternate_outlined, color: Colors.indigo),
+                                onPressed: _pickAndUploadImages,
+                                tooltip: 'Thêm bài làm',
+                              ),
+                            if (_isSelectionMode)
+                              TextButton(
+                                onPressed: () {
+                                  setState(() {
+                                    final allSelected = _gradableItems.every((i) => i.isSelected);
+                                    for (var i in _gradableItems) i.isSelected = !allSelected;
+                                  });
+                                },
+                                child: const Text('Tất cả'),
+                              ),
                           ],
-                        )
+                        ),
+                        if (!_isLoadingSubmissions && _gradableItems.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8, left: 4),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Tổng số: ${_gradableItems.length} bài nộp',
+                                  style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold),
+                                ),
+                                if (_isSelectionMode)
+                                  Text(
+                                    'Đã chọn: ${_gradableItems.where((i) => i.isSelected).length}',
+                                    style: const TextStyle(fontSize: 12, color: Colors.indigo, fontWeight: FontWeight.bold),
+                                  ),
+                              ],
+                            ),
+                          ),
                       ],
                     ),
                   ),
                   const Divider(height: 1),
+                  
                   Expanded(
                     child: _isLoadingSubmissions 
                       ? const Center(child: CircularProgressIndicator())
@@ -323,78 +471,162 @@ class _QuestionGradingScreenState extends State<QuestionGradingScreen> {
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                const Icon(Icons.search_off, size: 48, color: Colors.grey),
+                                const Icon(Icons.inventory_2_outlined, size: 48, color: Colors.grey),
                                 const SizedBox(height: 16),
-                                const Text('Chưa có bài làm nào.', style: TextStyle(color: Colors.grey)),
-                                TextButton(
-                                  onPressed: () {
-                                     Navigator.push(
-                                      context, 
-                                      MaterialPageRoute(builder: (ctx) => SubmissionManagementScreen(
-                                        exam: widget.exam,
-                                        question: widget.question,
-                                      ))
-                                    ).then((_) => _loadSubmissions());
-                                  }, 
-                                  child: const Text('Tải bài làm lên ngay')
+                                const Text('Kho bài làm đang trống.', style: TextStyle(color: Colors.grey)),
+                                ElevatedButton.icon(
+                                  onPressed: _pickAndUploadImages,
+                                  icon: const Icon(Icons.upload),
+                                  label: const Text('Tải ảnh bài làm lên'),
                                 )
                               ],
                             )
                           )
-                        : ListView.builder(
+                        : ListView.separated(
+                            padding: EdgeInsets.zero,
                             itemCount: _gradableItems.length,
+                            separatorBuilder: (context, index) => const Divider(height: 1),
                             itemBuilder: (context, index) {
                               final item = _gradableItems[index];
-                              return CheckboxListTile(
-                                value: item.isSelected,
-                                onChanged: _isProcessing ? null : (val) => setState(() => item.isSelected = val ?? false),
+                              final isCurrent = _processingStudentName == item.submission.studentName;
+                              
+                              return ListTile(
                                 dense: true,
-                                secondary: _getStatusIcon(item.status),
-                                title: Text(item.submission.studentName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                                subtitle: Row(
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                                leading: Row(
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    if (item.submission.imageBase64.isNotEmpty)
-                                      ClipRRect(
-                                        borderRadius: BorderRadius.circular(4),
-                                        child: Image.memory(
-                                          base64Decode(item.submission.imageBase64), 
-                                          width: 32, 
-                                          height: 32, 
-                                          fit: BoxFit.cover
-                                        ),
-                                      )
-                                    else
-                                      const Icon(Icons.image_outlined, size: 14, color: Colors.grey),
-                                    const SizedBox(width: 8),
-                                    if (item.error != null)
-                                      Expanded(child: Text(item.error!, style: const TextStyle(color: Colors.red, fontSize: 11), overflow: TextOverflow.ellipsis))
-                                    else 
-                                      Text('Ngày tải: ${item.submission.createdAt.day}/${item.submission.createdAt.month}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                    if (_isSelectionMode) ...[
+                                      Icon(
+                                        item.isSelected ? Icons.check_box : Icons.check_box_outline_blank,
+                                        color: item.isSelected ? Colors.indigo : Colors.grey,
+                                      ),
+                                      const SizedBox(width: 8),
+                                    ],
+                                    // Styled Thumbnail
+                                    Container(
+                                      width: 44,
+                                      height: 44,
+                                      decoration: BoxDecoration(
+                                        color: Colors.indigo.withOpacity(0.05),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: Colors.indigo.withOpacity(0.1)),
+                                      ),
+                                      child: Stack(
+                                        alignment: Alignment.center,
+                                        children: [
+                                          if (item.submission.imageBase64.isNotEmpty)
+                                            ClipRRect(
+                                              borderRadius: BorderRadius.circular(6),
+                                              child: Image.memory(
+                                                base64Decode(item.submission.imageBase64), 
+                                                width: 40, height: 40, fit: BoxFit.cover
+                                              ),
+                                            )
+                                          else
+                                            const Icon(Icons.image_outlined, size: 24, color: Colors.indigo),
+                                          
+                                          if (isCurrent)
+                                            Container(
+                                              decoration: BoxDecoration(
+                                                color: Colors.black26,
+                                                borderRadius: BorderRadius.circular(6),
+                                              ),
+                                              child: const Center(
+                                                child: SizedBox(
+                                                  width: 18, height: 18,
+                                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
                                   ],
                                 ),
+                                title: Text(item.submission.studentName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                subtitle: Text(
+                                  item.error != null 
+                                    ? 'Lỗi: ${item.error}' 
+                                    : 'Tải lên: ${item.submission.createdAt.day}/${item.submission.createdAt.month} ${item.submission.createdAt.hour}:${item.submission.createdAt.minute.toString().padLeft(2, '0')}',
+                                  style: TextStyle(fontSize: 11, color: item.error != null ? Colors.red : Colors.grey),
+                                ),
+                                trailing: _isSelectionMode 
+                                  ? null 
+                                  : Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          icon: const Icon(Icons.edit_outlined, size: 18, color: Colors.blue),
+                                          onPressed: () => _showRenameDialog(item.submission),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                                          onPressed: () => _confirmDelete(item.submission),
+                                        ),
+                                      ],
+                                    ),
+                                onTap: () {
+                                  if (_isSelectionMode) {
+                                    setState(() => item.isSelected = !item.isSelected);
+                                  } else {
+                                    _showFullImage(item.submission);
+                                  }
+                                },
                               );
                             },
                           ),
                   ),
-                  Padding(
+                  
+                  // Bottom Actions
+                  Container(
                     padding: const EdgeInsets.all(12.0),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade50,
+                      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+                    ),
                     child: SizedBox(
                       width: double.infinity,
                       height: 50,
-                      child: ElevatedButton.icon(
-                        icon: _isProcessing 
-                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                          : const Icon(Icons.send),
-                        onPressed: _isProcessing ? null : _processSelected,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.indigo, 
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
-                        ),
-                        label: Text(_isProcessing 
-                          ? 'ĐANG CHẤM: ${_processingStudentName ?? "..."}' 
-                          : 'BẮT ĐẦU CHẤM BÀI ĐÃ CHỌN'),
-                      ),
+                      child: _isSelectionMode
+                        ? Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: () => setState(() => _isSelectionMode = false),
+                                  child: const Text('Hủy'),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                flex: 2,
+                                child: ElevatedButton.icon(
+                                  icon: const Icon(Icons.play_arrow),
+                                  label: const Text('BẮT ĐẦU CHẤM'),
+                                  onPressed: _gradableItems.any((i) => i.isSelected) ? _processSelected : null,
+                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, foregroundColor: Colors.white),
+                                ),
+                              ),
+                            ],
+                          )
+                        : ElevatedButton.icon(
+                            icon: _isProcessing 
+                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                              : const Icon(Icons.checklist),
+                            onPressed: _isProcessing 
+                              ? null 
+                              : () => setState(() {
+                                  if (_gradableItems.isNotEmpty) _isSelectionMode = true;
+                                }),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _isProcessing ? Colors.grey : Colors.indigo,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
+                            ),
+                            label: Text(_isProcessing 
+                              ? 'ĐANG XỬ LÝ: ${_processingStudentName ?? "..."}' 
+                              : 'CHỌN BÀI ĐỂ CHẤM'),
+                          ),
                     ),
                   )
                 ],
