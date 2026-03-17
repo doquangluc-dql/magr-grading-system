@@ -114,6 +114,38 @@ class _SubmissionManagementScreenState extends State<SubmissionManagementScreen>
     );
   }
 
+  void _showRenameDialog(StudentSubmission sub) {
+    final controller = TextEditingController(text: sub.studentName);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Đổi tên bài làm / MSSV'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: 'Tên mới / MSSV',
+            border: OutlineInputBorder(),
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
+          ElevatedButton(
+            onPressed: () async {
+              final newName = controller.text.trim();
+              if (newName.isNotEmpty) {
+                Navigator.pop(ctx);
+                await DatabaseApi.updateStudentSubmissionName(sub.id, newName);
+                _loadSubmissions();
+              }
+            },
+            child: const Text('Lưu'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _showFullImage(StudentSubmission sub) async {
     // Show loading indicator
     showDialog(
@@ -270,10 +302,20 @@ class _SubmissionManagementScreenState extends State<SubmissionManagementScreen>
                         'Tải lên: ${s.createdAt.day.toString().padLeft(2, '0')}/${s.createdAt.month.toString().padLeft(2, '0')} ${s.createdAt.hour.toString().padLeft(2, '0')}:${s.createdAt.minute.toString().padLeft(2, '0')}',
                         style: const TextStyle(fontSize: 11, color: Colors.grey),
                       ),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete_outline, color: Colors.red),
-                        onPressed: () => _confirmDelete(s),
-                        tooltip: 'Xóa bài làm',
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit_outlined, color: Colors.blue, size: 20),
+                            onPressed: () => _showRenameDialog(s),
+                            tooltip: 'Đổi tên / MSSV',
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                            onPressed: () => _confirmDelete(s),
+                            tooltip: 'Xóa bài làm',
+                          ),
+                        ],
                       ),
                       onTap: () => _showFullImage(s),
                     );

@@ -98,7 +98,7 @@ class _QuestionDetailScreenState extends State<QuestionDetailScreen> {
                 style: const TextStyle(color: Colors.white, fontSize: 20),
                 decoration: const InputDecoration(
                   border: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white)),
-                  hintText: 'Nhập tên câu hỏi mới',
+                  hintText: ' tên câu hỏi mới',
                   hintStyle: TextStyle(color: Colors.white70),
                 ),
                 onSubmitted: (_) => _saveTitle(),

@@ -223,7 +223,7 @@ class _QuestionGradingScreenState extends State<QuestionGradingScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Chấm: ${widget.question.title}'),
+        title: Text('${widget.question.title}'),
         backgroundColor: Colors.indigo,
         foregroundColor: Colors.white,
         actions: [

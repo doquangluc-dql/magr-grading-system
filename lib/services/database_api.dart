@@ -295,6 +295,24 @@ class DatabaseApi {
     }
   }
 
+  static Future<void> updateStudentSubmissionName(String submissionId, String newName) async {
+    try {
+      final sub = await getStudentSubmissionById(submissionId);
+      await _query("updateOne", "submissions", {
+        "filter": {"_id": {"\$oid": submissionId}},
+        "update": {
+          "\$set": {"studentName": newName}
+        }
+      });
+      if (sub != null) {
+        _submissionsCache.remove("${sub.examId}_${sub.questionId}");
+        _submissionsCache.remove("${sub.examId}_all");
+      }
+    } catch (e) {
+      print("Error updating student submission name: $e");
+    }
+  }
+
   // --- GRADING SESSIONS APIs ---
 
   static Future<List<GradingSession>> getGradingSessionsForExam(

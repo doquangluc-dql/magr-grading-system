@@ -138,7 +138,7 @@ class _GradingSessionScreenState extends State<GradingSessionScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Chọn câu để chấm: ${widget.exam.title}'),
+        title: Text('${widget.exam.title}'),
         backgroundColor: Colors.indigo,
         foregroundColor: Colors.white,
       ),
@@ -171,12 +171,13 @@ class _GradingSessionScreenState extends State<GradingSessionScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 color: Colors.indigo.shade50,
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  mainAxisAlignment: MainAxisAlignment.start,
                   children: [
                     const Text(
                       'Google Sheets:',
                       style: TextStyle(fontWeight: FontWeight.bold, color: Colors.indigo),
                     ),
+                    const SizedBox(width: 8),
                     if (widget.exam.googleSheetId == null)
                       ElevatedButton.icon(
                         onPressed: _isCreatingSheet ? null : _connectGoogleSheet,

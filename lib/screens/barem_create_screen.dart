@@ -89,7 +89,7 @@ class _BaremCreateScreenState extends State<BaremCreateScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Nhập Barem Đáp Án'),
+        title: const Text('Tạo Barem'),
         backgroundColor: Colors.blueAccent,
         foregroundColor: Colors.white,
         actions: [
@@ -160,41 +160,35 @@ class _BaremCreateScreenState extends State<BaremCreateScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
-                        children: [
-                          Text('Bước ${index + 1}', 
-                               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                          if (steps.length > 1)
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
-                              onPressed: () => removeStep(index),
-                              tooltip: 'Xóa bước này',
-                            ),
-                        ],
-                      ),
-                      Row(
-                        children: [
-                          // Ô nhập Điểm MỚI
-                          SizedBox(
-                            width: 80,
-                            child: TextFormField(
-                              initialValue: steps[index].score.toString(),
-                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                              decoration: const InputDecoration(
-                                labelText: 'Điểm',
-                                border: OutlineInputBorder(),
-                                isDense: true,
-                                suffixText: 'đ',
-                              ),
-                              onChanged: (value) {
-                                steps[index].score = double.tryParse(value) ?? 0.0;
-                              },
-                            ),
+                      Text('Bước ${index + 1}', 
+                           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      const SizedBox(width: 12),
+                      // Ô nhập Điểm
+                      SizedBox(
+                        width: 100,
+                        child: TextFormField(
+                          initialValue: steps[index].score.toString(),
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(
+                            labelText: 'Điểm',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                            suffixText: 'đ',
                           ),
-                        ],
-                      )
+                          onChanged: (value) {
+                            String normalized = value.replaceAll(',', '.');
+                            steps[index].score = double.tryParse(normalized) ?? 0.0;
+                          },
+                        ),
+                      ),
+                      const Spacer(),
+                      if (steps.length > 1)
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 24),
+                          onPressed: () => removeStep(index),
+                          tooltip: 'Xóa bước này',
+                        ),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -208,7 +202,7 @@ class _BaremCreateScreenState extends State<BaremCreateScreen> {
                           maxLines: 4,
                           decoration: InputDecoration(
                             border: const OutlineInputBorder(),
-                            hintText: r'Nhập nội dung (VD: Học sinh viết đúng $x+1=2$)',
+                            hintText: 'Học sinh giải hệ được $x = 2, y = 3$',
                             filled: true,
                             fillColor: Colors.grey.shade50,
                           ),

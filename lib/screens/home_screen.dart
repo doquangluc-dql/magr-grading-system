@@ -50,7 +50,7 @@ class _HomeScreenState extends State<HomeScreen> {
           content: TextField(
             controller: _titleController,
             decoration: const InputDecoration(
-              hintText: 'Nhập tên câu hỏi (VD: Câu 1: Giải PT)',
+              hintText: 'Ví dụ: Giải phương trình',
               border: OutlineInputBorder(),
             ),
             autofocus: true,
@@ -91,7 +91,7 @@ class _HomeScreenState extends State<HomeScreen> {
           content: TextField(
             controller: _titleController,
             decoration: const InputDecoration(
-              hintText: 'Nhập tên kỳ thi (VD: Giữa kỳ Toán)',
+              hintText: 'Giữa kỳ lớp 9A',
               border: OutlineInputBorder(),
             ),
             autofocus: true,
