@@ -41,26 +41,13 @@ let gradingQueue = [];
 let isProcessingQueue = false;
 
 async function addToGradingQueue(batchId, submissionIds, webhookUrl, commonMetadata) {
-  // --- LẤY BAREM CỦA GIÁO VIÊN ---
-  let barem = [];
-  try {
-    const questionId = submissionIds.length > 0 ? (await db.collection('submissions').findOne({ _id: new ObjectId(submissionIds[0]) }))?.questionId : null;
-    if (questionId) {
-      const question = await db.collection('questions').findOne({ _id: new ObjectId(questionId) });
-      barem = question?.steps || [];
-    }
-  } catch (e) {
-    console.error("Lỗi lấy barem:", e);
-  }
-
   // Thêm tất cả bài làm của Batch vào hàng đợi chung
   for (const subId of submissionIds) {
     gradingQueue.push({
       batchId,
       subId,
       webhookUrl,
-      commonMetadata,
-      barem // Gắn barem vào task để gửi cho học sinh sau này
+      commonMetadata
     });
   }
   
@@ -121,9 +108,14 @@ async function processGlobalQueue() {
       });
 
       const n8nData = response.data;
-      if (!n8nData.error) {
+      
+      // Kiểm tra chặt chẽ: Phải có điểm số (score) từ n8n thì mới coi là thành công
+      if (n8nData && (n8nData.status === 'success' || n8nData.score !== undefined)) {
         isSuccess = true;
         if (n8nData.sheetUrl) batchSheetUrl = n8nData.sheetUrl;
+      } else {
+        isSuccess = false;
+        console.warn(`    [n8n Response] Kết quả không hợp lệ hoặc thiếu điểm số:`, n8nData);
       }
 
       await sessionCol.updateOne(
@@ -139,25 +131,6 @@ async function processGlobalQueue() {
           }
         }
       );
-
-      // --- GỬI THÔNG BÁO CHO HỌC SINH TỨC THÌ (GỬI LÊN n8n XỬ LÝ) ---
-      if (isSuccess) {
-        try {
-          const studentNotifyUrl = webhookUrl.replace('magr-grading-webhook', 'magr-student-notification');
-          await axios.post(studentNotifyUrl, {
-            mssv: sub.studentName, // MSSV được lấy từ tên sinh viên lúc nộp bài
-            score: n8nData.score,
-            examTitle: commonMetadata.examTitle,
-            questionTitle: commonMetadata.questionTitle,
-            barem: task.barem || [], // Dữ liệu Barem gốc của giáo viên
-            gradingDetails: n8nData.gradingDetails || n8nData.details || [], // Chi tiết chấm AI trả về
-            timestamp: new Date().toISOString()
-          });
-          console.log(`    [Student Notify] Đã gửi kết quả MSSV: ${sub.studentName} sang n8n.`);
-        } catch (studentErr) {
-          console.error(`    [Student Notify Error] Thất bại khi đẩy lên n8n:`, studentErr.message);
-        }
-      }
     }
   } catch (error) {
     const errorMessage = error.response ? `N8N Error ${error.response.status}: ${JSON.stringify(error.response.data)}` : error.message;
@@ -274,7 +247,6 @@ app.post('/api/grading/start-batch', async (req, res) => {
       batchId: batchId.toString(),
       submissionId: sub._id.toString(),
       studentName: sub.studentName,
-      studentEmail: sub.studentEmail || sub.email, // Lấy Email nếu có
       studentImageBase64: sub.imageBase64,
       examId: sub.examId,
       questionId: sub.questionId,

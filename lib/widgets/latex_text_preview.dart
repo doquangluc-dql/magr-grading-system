@@ -22,31 +22,37 @@ class LatexTextPreview extends StatelessWidget {
       if (parts[i].isEmpty) continue;
 
       if (i % 2 == 0) {
-        // Văn bản thường
+        // Văn bản thường: Để TextSpan bọc trong SelectableText tự xuống dòng
         spans.add(TextSpan(
           text: parts[i],
-          style: const TextStyle(fontSize: 18, color: Colors.black87),
+          style: const TextStyle(fontSize: 18, color: Colors.black87, height: 1.5),
         ));
       } else {
-        // Công thức Toánhọc
+        // Công thức Toán học: Bọc trong cuộn ngang để không làm vỡ giao diện
         spans.add(WidgetSpan(
           alignment: PlaceholderAlignment.middle,
-          child: Math.tex(
-            parts[i],
-            textStyle: const TextStyle(fontSize: 18),
-            onErrorFallback: (err) => Text(
-              '\$${parts[i]}\$',
-              style: const TextStyle(color: Colors.red),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4.0),
+              child: Math.tex(
+                parts[i],
+                textStyle: const TextStyle(fontSize: 18),
+                mathStyle: MathStyle.text,
+                onErrorFallback: (err) => Text(
+                  '\$${parts[i]}\$',
+                  style: const TextStyle(color: Colors.red),
+                ),
+              ),
             ),
           ),
         ));
       }
     }
 
-    return SingleChildScrollView(
-      child: SelectableText.rich(
-        TextSpan(children: spans),
-      ),
+    return SelectableText.rich(
+      TextSpan(children: spans),
+      textAlign: TextAlign.left,
     );
   }
 }

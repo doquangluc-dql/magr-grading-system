@@ -60,7 +60,7 @@ class _BaremCreateScreenState extends State<BaremCreateScreen> {
   void _saveBaremData() async {
     // Show loading
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Đang lưu Barem lên MongoDB...'))
+      const SnackBar(content: Text('Đang lưu Barem...'))
     );
 
     // Allow update content before firing API update (this won't update the 'content' field on DB yet
@@ -78,10 +78,12 @@ class _BaremCreateScreenState extends State<BaremCreateScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('✅ Lưu Barem lên Cloud thành công!'),
+          content: Text('✅ Đã lưu Barem'),
           backgroundColor: Colors.green,
         )
       );
+      // Tự động thoát ra trang trước
+      Navigator.of(context).pop();
     }
   }
 

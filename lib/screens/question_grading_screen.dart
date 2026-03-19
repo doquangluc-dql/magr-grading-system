@@ -54,12 +54,43 @@ class _QuestionGradingScreenState extends State<QuestionGradingScreen> {
   final TextEditingController _searchController = TextEditingController();
 
   final String _n8nWebhookUrl = 'https://doquangluc-dql.app.n8n.cloud/webhook/magr-grading-webhook';
-  // final String _n8nWebhookUrl = 'https://doquangluc-dql.app.n8n.cloud/webhook-test/magr-grading-webhook';
+  late TextEditingController _batchNameController;
+  String? _nameError;
 
   @override
   void initState() {
     super.initState();
+    _batchNameController = TextEditingController();
+    _suggestUniqueBatchName();
     _loadAll();
+  }
+
+  Future<void> _suggestUniqueBatchName() async {
+    final baseName = "${widget.exam.title} - ${widget.question.title}";
+    String suggestedName = baseName;
+    int counter = 0;
+
+    try {
+      final batches = await DatabaseApi.getGradingBatches();
+      final questionBatches = batches.where((b) => b.questionId == widget.question.id).toList();
+
+      while (questionBatches.any((b) => b.batchName.trim().toLowerCase() == suggestedName.trim().toLowerCase())) {
+        counter++;
+        suggestedName = "$baseName ($counter)";
+      }
+
+      if (mounted) {
+        setState(() {
+          _batchNameController.text = suggestedName;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _batchNameController.text = baseName;
+        });
+      }
+    }
   }
 
   void _loadAll({bool forceRefresh = false}) {
@@ -127,45 +158,34 @@ class _QuestionGradingScreenState extends State<QuestionGradingScreen> {
   }
 
 
-  void _showBatchNameDialog() {
-    final selectedCount = _gradableItems.where((item) => item.isSelected).length;
-    if (selectedCount == 0) return;
+  Future<bool> _isBatchNameDuplicate(String name) async {
+    try {
+      final batches = await DatabaseApi.getGradingBatches();
+      // Lọc các đợt chấm thuộc về câu hỏi hiện tại và so sánh tên
+      return batches.any((b) => 
+        b.questionId == widget.question.id && 
+        b.batchName.trim().toLowerCase() == name.trim().toLowerCase()
+      );
+    } catch (e) {
+      return false;
+    }
+  }
 
-    final controller = TextEditingController(text: "${widget.exam.title} - ${widget.question.title}");
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Tên đợt chấm bài'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Bạn đã chọn $selectedCount bài để chấm.', style: const TextStyle(fontSize: 13, color: Colors.grey)),
-            const SizedBox(height: 16),
-            TextField(
-              controller: controller,
-              decoration: const InputDecoration(
-                labelText: 'Tên gợi nhớ (Ví dụ: Chấm lần 1)',
-                border: OutlineInputBorder(),
-              ),
-              autofocus: true,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Hủy')),
-          ElevatedButton(
-            onPressed: () {
-              final name = controller.text.trim();
-              Navigator.pop(context);
-              _processSelected(batchName: name.isNotEmpty ? name : null);
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, foregroundColor: Colors.white),
-            child: const Text('BẮT ĐẦU CHẤM'),
-          ),
-        ],
-      ),
-    );
+  Future<void> _startGradingProcess() async {
+    final name = _batchNameController.text.trim();
+    if (name.isEmpty) {
+      setState(() => _nameError = 'Vui lòng nhập tên đợt chấm');
+      return;
+    }
+
+    final isDuplicate = await _isBatchNameDuplicate(name);
+    if (isDuplicate) {
+      setState(() => _nameError = 'Tên đợt chấm này đã tồn tại, vui lòng đổi tên khác');
+      return;
+    }
+
+    setState(() => _nameError = null);
+    _processSelected(batchName: name);
   }
 
   Future<void> _processSelected({String? batchName}) async {
@@ -406,320 +426,335 @@ class _QuestionGradingScreenState extends State<QuestionGradingScreen> {
           )
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          if (_isUploading) const LinearProgressIndicator(),
-          if (_isProcessing && _processingStudentName != null)
-            Container(
-              padding: const EdgeInsets.all(12),
-              color: Colors.indigo.shade900,
-              child: Row(
-                children: [
-                  const SizedBox(
-                    width: 24, height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+          // TOÀN BỘ GIAO DIỆN CHÍNH
+          Column(
+            children: [
+              Expanded(
+                child: Container(
+                  margin: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      const BoxShadow(color: Colors.black12, blurRadius: 4)
+                    ],
+                    border: Border.all(color: Colors.grey.shade300),
                   ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'HỆ THỐNG ĐANG CHẤM BÀI',
-                          style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2),
-                        ),
-                        Text(
-                          'Đang xử lý: $_processingStudentName',
-                          style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          Expanded(
-            child: Container(
-              margin: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [const BoxShadow(color: Colors.black12, blurRadius: 4)],
-                border: Border.all(color: Colors.grey.shade300),
-              ),
-              child: Column(
-                children: [
-                  // Toolbar
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
+                  child: Column(
+                    children: [
+                      // Toolbar
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _searchController,
-                                decoration: InputDecoration(
-                                  hintText: 'Tìm học sinh...',
-                                  prefixIcon: const Icon(Icons.search, size: 20),
-                                  suffixIcon: _searchController.text.isNotEmpty 
-                                    ? IconButton(
-                                        icon: const Icon(Icons.clear, size: 20),
-                                        onPressed: () {
-                                          _searchController.clear();
-                                          _loadSubmissions();
-                                        },
-                                      )
-                                    : null,
-                                  isDense: true,
-                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                                ),
-                                onSubmitted: (_) => _loadSubmissions(),
-                              ),
-                            ),
-                            if (!_isSelectionMode && !_isProcessing)
-                              IconButton(
-                                icon: const Icon(Icons.add_photo_alternate_outlined, color: Colors.indigo),
-                                onPressed: _pickAndUploadImages,
-                                tooltip: 'Thêm bài làm',
-                              ),
-                            if (_isSelectionMode)
-                              TextButton(
-                                onPressed: () {
-                                  setState(() {
-                                    final allSelected = _gradableItems.every((i) => i.isSelected);
-                                    for (var i in _gradableItems) i.isSelected = !allSelected;
-                                  });
-                                },
-                                child: const Text('Tất cả'),
-                              ),
-                          ],
-                        ),
-                        if (!_isLoadingSubmissions && _gradableItems.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8, left: 4),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            Row(
                               children: [
-                                Text(
-                                  'Tổng số: ${_gradableItems.length} bài nộp',
-                                  style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold),
+                                Expanded(
+                                  child: TextField(
+                                    controller: _searchController,
+                                    decoration: InputDecoration(
+                                      hintText: 'Tìm học sinh...',
+                                      prefixIcon: const Icon(Icons.search, size: 20),
+                                      suffixIcon: _searchController.text.isNotEmpty 
+                                        ? IconButton(
+                                            icon: const Icon(Icons.clear, size: 20),
+                                            onPressed: () {
+                                              _searchController.clear();
+                                              _loadSubmissions();
+                                            },
+                                          )
+                                        : null,
+                                      isDense: true,
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                    ),
+                                    onSubmitted: (_) => _loadSubmissions(),
+                                  ),
                                 ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            // --- Ô NHẬP TÊN ĐỢT CHẤM ---
+                            TextField(
+                              controller: _batchNameController,
+                              decoration: InputDecoration(
+                                labelText: 'Tên đợt chấm bài',
+                                hintText: 'Ví dụ: Chấm bù lần 1...',
+                                errorText: _nameError,
+                                prefixIcon: const Icon(Icons.bookmark_outline, size: 20),
+                                border: const OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                              onChanged: (_) {
+                                if (_nameError != null) setState(() => _nameError = null);
+                              },
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                if (!_isSelectionMode && !_isProcessing)
+                                  IconButton(
+                                    icon: const Icon(Icons.add_photo_alternate_outlined, color: Colors.indigo),
+                                    onPressed: _pickAndUploadImages,
+                                    tooltip: 'Thêm bài làm',
+                                  ),
                                 if (_isSelectionMode)
-                                  Text(
-                                    'Đã chọn: ${_gradableItems.where((i) => i.isSelected).length}',
-                                    style: const TextStyle(fontSize: 12, color: Colors.indigo, fontWeight: FontWeight.bold),
+                                  TextButton(
+                                    onPressed: () {
+                                      setState(() {
+                                        final allSelected = _gradableItems.every((i) => i.isSelected);
+                                        for (var i in _gradableItems) i.isSelected = !allSelected;
+                                      });
+                                    },
+                                    child: const Text('Tất cả'),
                                   ),
                               ],
                             ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  const Divider(height: 1),
-                  
-                  Expanded(
-                    child: _isLoadingSubmissions 
-                      ? const Center(child: CircularProgressIndicator())
-                      : _gradableItems.isEmpty 
-                        ? Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(Icons.inventory_2_outlined, size: 48, color: Colors.grey),
-                                const SizedBox(height: 16),
-                                const Text('Kho bài làm đang trống.', style: TextStyle(color: Colors.grey)),
-                                ElevatedButton.icon(
-                                  onPressed: _pickAndUploadImages,
-                                  icon: const Icon(Icons.upload),
-                                  label: const Text('Tải ảnh bài làm lên'),
-                                )
-                              ],
-                            )
-                          )
-                        : ListView.separated(
-                            padding: EdgeInsets.zero,
-                            itemCount: _gradableItems.length,
-                            separatorBuilder: (context, index) => const Divider(height: 1),
-                            itemBuilder: (context, index) {
-                              final item = _gradableItems[index];
-                              final isCurrent = _processingStudentName == item.submission.studentName;
-                              
-                              return ListTile(
-                                dense: true,
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                                leading: Row(
-                                  mainAxisSize: MainAxisSize.min,
+                            if (!_isLoadingSubmissions && _gradableItems.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8, left: 4),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    if (_isSelectionMode) ...[
-                                      Icon(
-                                        item.isSelected ? Icons.check_box : Icons.check_box_outline_blank,
-                                        color: item.isSelected ? Colors.indigo : Colors.grey,
-                                      ),
-                                      const SizedBox(width: 8),
-                                    ],
-                                    // Styled Thumbnail
-                                    Container(
-                                      width: 44,
-                                      height: 44,
-                                      decoration: BoxDecoration(
-                                        color: Colors.indigo.withOpacity(0.05),
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(color: Colors.indigo.withOpacity(0.1)),
-                                      ),
-                                      child: Stack(
-                                        alignment: Alignment.center,
-                                        children: [
-                                          if (item.submission.imageBase64.isNotEmpty)
-                                            ClipRRect(
-                                              borderRadius: BorderRadius.circular(6),
-                                              child: Image.memory(
-                                                base64Decode(item.submission.imageBase64), 
-                                                width: 40, height: 40, fit: BoxFit.cover
-                                              ),
-                                            )
-                                          else
-                                            const SizedBox(
-                                              width: 20, height: 20,
-                                              child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.indigo),
-                                            ),
-                                          
-                                          if (isCurrent)
-                                            Container(
-                                              decoration: BoxDecoration(
-                                                color: Colors.black26,
-                                                borderRadius: BorderRadius.circular(6),
-                                              ),
-                                              child: const Center(
-                                                child: SizedBox(
-                                                  width: 18, height: 18,
-                                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                                ),
-                                              ),
-                                            ),
-                                        ],
-                                      ),
+                                    Text(
+                                      'Tổng số: ${_gradableItems.length} bài nộp',
+                                      style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold),
                                     ),
+                                    if (_isSelectionMode)
+                                      Text(
+                                        'Đã chọn: ${_gradableItems.where((i) => i.isSelected).length}',
+                                        style: const TextStyle(fontSize: 12, color: Colors.indigo, fontWeight: FontWeight.bold),
+                                      ),
                                   ],
                                 ),
-                                title: Text(item.submission.studentName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                                subtitle: Text(
-                                  item.error != null 
-                                    ? 'Lỗi: ${item.error}' 
-                                    : 'Tải lên: ${item.submission.createdAt.day}/${item.submission.createdAt.month} ${item.submission.createdAt.hour}:${item.submission.createdAt.minute.toString().padLeft(2, '0')}',
-                                  style: TextStyle(fontSize: 11, color: item.error != null ? Colors.red : Colors.grey),
-                                ),
-                                trailing: _isSelectionMode 
-                                  ? null 
-                                  : Row(
+                              ),
+                          ],
+                        ),
+                      ),
+                      const Divider(height: 1),
+                      
+                      // Danh sách bài nộp
+                      Expanded(
+                        child: _isLoadingSubmissions 
+                          ? const Center(child: CircularProgressIndicator())
+                          : _gradableItems.isEmpty 
+                            ? Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(Icons.inventory_2_outlined, size: 48, color: Colors.grey),
+                                    const SizedBox(height: 16),
+                                    const Text('Kho bài làm đang trống.', style: TextStyle(color: Colors.grey)),
+                                    ElevatedButton.icon(
+                                      onPressed: _pickAndUploadImages,
+                                      icon: const Icon(Icons.upload),
+                                      label: const Text('Tải ảnh bài làm lên'),
+                                    )
+                                  ],
+                                )
+                              )
+                            : ListView.separated(
+                                padding: EdgeInsets.zero,
+                                itemCount: _gradableItems.length,
+                                separatorBuilder: (context, index) => const Divider(height: 1),
+                                itemBuilder: (context, index) {
+                                  final item = _gradableItems[index];
+                                  final isCurrent = _processingStudentName == item.submission.studentName;
+                                  
+                                  return ListTile(
+                                    dense: true,
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                                    leading: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        // Status Indicator
-                                        if (item.status == 'Success')
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                            decoration: BoxDecoration(
-                                              color: Colors.green.shade50,
-                                              borderRadius: BorderRadius.circular(12),
-                                              border: Border.all(color: Colors.green.shade200),
-                                            ),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                const Icon(Icons.check_circle, size: 12, color: Colors.green),
-                                                const SizedBox(width: 4),
-                                                Text(
-                                                  item.score != null ? '${item.score} đ' : 'Đã chấm',
-                                                  style: const TextStyle(fontSize: 11, color: Colors.green, fontWeight: FontWeight.bold),
-                                                ),
-                                              ],
-                                            ),
-                                          )
-                                        else if (item.status == 'Failed')
-                                          const Tooltip(
-                                            message: 'Chấm thất bại',
-                                            child: Icon(Icons.error_outline, color: Colors.red, size: 20),
+                                        if (_isSelectionMode) ...[
+                                          Icon(
+                                            item.isSelected ? Icons.check_box : Icons.check_box_outline_blank,
+                                            color: item.isSelected ? Colors.indigo : Colors.grey,
                                           ),
-                                          
-                                        const SizedBox(width: 4),
-                                        IconButton(
-                                          icon: const Icon(Icons.edit_outlined, size: 18, color: Colors.blue),
-                                          onPressed: () => _showRenameDialog(item.submission),
-                                        ),
-                                        IconButton(
-                                          icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
-                                          onPressed: () => _confirmDelete(item.submission),
+                                          const SizedBox(width: 8),
+                                        ],
+                                        Container(
+                                          width: 44,
+                                          height: 44,
+                                          decoration: BoxDecoration(
+                                            color: Colors.indigo.withOpacity(0.05),
+                                            borderRadius: BorderRadius.circular(8),
+                                            border: Border.all(color: Colors.indigo.withOpacity(0.1)),
+                                          ),
+                                          child: Stack(
+                                            alignment: Alignment.center,
+                                            children: [
+                                              if (item.submission.imageBase64.isNotEmpty)
+                                                ClipRRect(
+                                                  borderRadius: BorderRadius.circular(6),
+                                                  child: Image.memory(
+                                                    base64Decode(item.submission.imageBase64), 
+                                                    width: 40, height: 40, fit: BoxFit.cover
+                                                  ),
+                                                )
+                                              else
+                                                const SizedBox(
+                                                  width: 20, height: 20,
+                                                  child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.indigo),
+                                                ),
+                                            ],
+                                          ),
                                         ),
                                       ],
                                     ),
-                                onTap: () {
-                                  if (_isSelectionMode) {
-                                    setState(() => item.isSelected = !item.isSelected);
-                                  } else {
-                                    _showFullImage(item.submission);
-                                  }
+                                    title: Text(item.submission.studentName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                    subtitle: Text(
+                                      item.error != null 
+                                        ? 'Lỗi: ${item.error}' 
+                                        : 'Tải lên: ${item.submission.createdAt.day}/${item.submission.createdAt.month} ${item.submission.createdAt.hour}:${item.submission.createdAt.minute.toString().padLeft(2, '0')}',
+                                      style: TextStyle(fontSize: 11, color: item.error != null ? Colors.red : Colors.grey),
+                                    ),
+                                    trailing: _isSelectionMode 
+                                      ? null 
+                                      : Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            if (item.status == 'Success')
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.green.shade50,
+                                                  borderRadius: BorderRadius.circular(12),
+                                                  border: Border.all(color: Colors.green.shade200),
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    const Icon(Icons.check_circle, size: 12, color: Colors.green),
+                                                    const SizedBox(width: 4),
+                                                    Text(
+                                                      item.score != null ? '${item.score} đ' : 'Đã chấm',
+                                                      style: const TextStyle(fontSize: 11, color: Colors.green, fontWeight: FontWeight.bold),
+                                                    ),
+                                                  ],
+                                                ),
+                                              )
+                                            else if (item.status == 'Failed')
+                                              const Tooltip(
+                                                message: 'Chấm thất bại',
+                                                child: Icon(Icons.error_outline, color: Colors.red, size: 20),
+                                              ),
+                                            const SizedBox(width: 4),
+                                            IconButton(
+                                              icon: const Icon(Icons.edit_outlined, size: 18, color: Colors.blue),
+                                              onPressed: () => _showRenameDialog(item.submission),
+                                            ),
+                                            IconButton(
+                                              icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                                              onPressed: () => _confirmDelete(item.submission),
+                                            ),
+                                          ],
+                                        ),
+                                    onTap: () {
+                                      if (_isSelectionMode) {
+                                        setState(() => item.isSelected = !item.isSelected);
+                                      } else {
+                                        _showFullImage(item.submission);
+                                      }
+                                    },
+                                  );
                                 },
-                              );
-                            },
-                          ),
+                              ),
+                      ),
+                      
+                      // Nút hành động phía dưới
+                      Container(
+                        padding: const EdgeInsets.all(12.0),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade50,
+                          borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+                        ),
+                        child: SizedBox(
+                          width: double.infinity,
+                          height: 50,
+                          child: _isSelectionMode
+                            ? Row(
+                                children: [
+                                  Expanded(
+                                    child: OutlinedButton(
+                                      onPressed: () => setState(() => _isSelectionMode = false),
+                                      child: const Text('Hủy'),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    flex: 2,
+                                    child: ElevatedButton.icon(
+                                      icon: const Icon(Icons.play_arrow),
+                                      label: const Text('BẮT ĐẦU CHẤM'),
+                                      onPressed: _gradableItems.any((i) => i.isSelected) ? _startGradingProcess : null,
+                                      style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, foregroundColor: Colors.white),
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : ElevatedButton.icon(
+                                icon: _isProcessing 
+                                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                                  : const Icon(Icons.checklist),
+                                onPressed: _isProcessing 
+                                  ? null 
+                                  : () => setState(() {
+                                      if (_gradableItems.isNotEmpty) _isSelectionMode = true;
+                                    }),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: _isProcessing ? Colors.grey : Colors.indigo,
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
+                                ),
+                                label: Text(_isProcessing 
+                                  ? 'ĐANG XỬ LÝ...' 
+                                  : 'CHỌN BÀI ĐỂ CHẤM'),
+                              ),
+                        ),
+                      )
+                    ],
                   ),
-                  
-                  // Bottom Actions
-                  Container(
-                    padding: const EdgeInsets.all(12.0),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade50,
-                      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
-                    ),
-                    child: SizedBox(
-                      width: double.infinity,
-                      height: 50,
-                      child: _isSelectionMode
-                        ? Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton(
-                                  onPressed: () => setState(() => _isSelectionMode = false),
-                                  child: const Text('Hủy'),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                flex: 2,
-                                child: ElevatedButton.icon(
-                                  icon: const Icon(Icons.play_arrow),
-                                  label: const Text('BẮT ĐẦU CHẤM'),
-                                  onPressed: _gradableItems.any((i) => i.isSelected) ? _showBatchNameDialog : null,
-                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, foregroundColor: Colors.white),
-                                ),
-                              ),
-                            ],
-                          )
-                        : ElevatedButton.icon(
-                            icon: _isProcessing 
-                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                              : const Icon(Icons.checklist),
-                            onPressed: _isProcessing 
-                              ? null 
-                              : () => setState(() {
-                                  if (_gradableItems.isNotEmpty) _isSelectionMode = true;
-                                }),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: _isProcessing ? Colors.grey : Colors.indigo,
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
-                            ),
-                            label: Text(_isProcessing 
-                              ? 'ĐANG XỬ LÝ: ${_processingStudentName ?? "..."}' 
-                              : 'CHỌN BÀI ĐỂ CHẤM'),
-                          ),
-                    ),
-                  )
-                ],
+                ),
+              ),
+            ],
+          ),
+          
+          // --- LỚP PHỦ LOADING ---
+          if (_isProcessing)
+            Container(
+              color: Colors.black54,
+              width: double.infinity,
+              height: double.infinity,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 30),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 20, spreadRadius: 5)
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(
+                        width: 60, height: 60,
+                        child: CircularProgressIndicator(strokeWidth: 5, valueColor: AlwaysStoppedAnimation<Color>(Colors.indigo)),
+                      ),
+                      const SizedBox(height: 24),
+                      const Text('Đang nạp bài chấm...', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo)),
+                      const SizedBox(height: 8),
+                      const Text('Vui lòng chờ trong giây lát', style: TextStyle(fontSize: 13, color: Colors.grey)),
+                    ],
+                  ),
+                ),
               ),
             ),
-          ),
         ],
       ),
     );

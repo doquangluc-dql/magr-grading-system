@@ -271,15 +271,22 @@ class DatabaseApi {
     }
   }
 
-  static Future<void> insertStudentSubmission(StudentSubmission submission) async {
+  static Future<StudentSubmission> insertStudentSubmission(StudentSubmission submission) async {
     try {
       final doc = submission.toJson();
       doc.remove('_id');
-      await _query("insertOne", "submissions", {"document": doc});
+      final res = await _query("insertOne", "submissions", {"document": doc});
+      
+      // Lấy ID thật từ n8n/MongoDB trả về
+      String realId = res['insertedId']?.toString() ?? '';
+      submission.id = realId;
+
       _submissionsCache.remove("${submission.examId}_${submission.questionId}");
       _submissionsCache.remove("${submission.examId}_all");
+      return submission;
     } catch (e) {
       print("Error inserting student submission: $e");
+      rethrow;
     }
   }
 

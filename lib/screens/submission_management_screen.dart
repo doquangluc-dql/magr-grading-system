@@ -23,7 +23,7 @@ class SubmissionManagementScreen extends StatefulWidget {
 }
 
 class _SubmissionManagementScreenState extends State<SubmissionManagementScreen> {
-  late Future<List<StudentSubmission>> _submissionsFuture;
+  List<StudentSubmission>? _submissions;
   final ImagePicker _picker = ImagePicker();
   final TextEditingController _searchController = TextEditingController();
   bool _isUploading = false;
@@ -34,28 +34,59 @@ class _SubmissionManagementScreenState extends State<SubmissionManagementScreen>
     _loadSubmissions();
   }
 
-  void _loadSubmissions({bool forceRefresh = false}) {
-    setState(() {
-      _submissionsFuture = DatabaseApi.getStudentSubmissionsForExam(
+  Future<void> _loadSubmissions({bool forceRefresh = false}) async {
+    try {
+      final items = await DatabaseApi.getStudentSubmissionsForExam(
         widget.exam.id,
         questionId: widget.question.id,
         searchTerm: _searchController.text.trim(),
         includeImage: false, 
         forceRefresh: forceRefresh,
       );
-    });
+      if (mounted) {
+        setState(() {
+          _submissions = items;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi tải danh sách: $e')));
+      }
+    }
   }
 
   Future<void> _pickAndUploadImages() async {
     final List<XFile> images = await _picker.pickMultiImage();
     if (images.isEmpty) return;
 
+    if (_submissions == null) return;
+
     setState(() {
       _isUploading = true;
     });
 
+    // --- OPTIMISTIC UI: THÊM TẠM THỜI VÀO DANH SÁCH ---
+    final List<StudentSubmission> tempItems = [];
+    for (var image in images) {
+      tempItems.add(StudentSubmission(
+        id: 'temp_${DateTime.now().millisecondsSinceEpoch}_${image.name}', // iD tạm
+        examId: widget.exam.id,
+        questionId: widget.question.id,
+        studentName: image.name,
+        imageBase64: '', // Chưa có ảnh
+        createdAt: DateTime.now(),
+      ));
+    }
+
+    setState(() {
+      _submissions = [...tempItems, ..._submissions!]; 
+    });
+
     try {
-      for (var image in images) {
+      for (int i = 0; i < images.length; i++) {
+        final image = images[i];
+        final tempItemId = tempItems[i].id;
+
         Uint8List bytes = await image.readAsBytes();
         String base64 = base64Encode(bytes);
         
@@ -68,32 +99,46 @@ class _SubmissionManagementScreenState extends State<SubmissionManagementScreen>
           createdAt: DateTime.now(),
         );
         
-        await DatabaseApi.insertStudentSubmission(submission);
+        // Gửi lên server
+        final realSubmission = await DatabaseApi.insertStudentSubmission(submission);
+        
+        // --- CẬP NHẬT BẢN GHI TẠM THÀNH BẢN GHI THẬT ---
+        if (mounted) {
+          setState(() {
+            final index = _submissions!.indexWhere((element) => element.id == tempItemId);
+            if (index != -1) {
+              _submissions![index] = realSubmission;
+            }
+          });
+        }
       }
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Đã tải lên ${images.length} ảnh bài làm cho ${widget.question.title}!'), 
-            backgroundColor: Colors.green
+            content: Text('✅ Đã tải lên ${images.length} bài làm thành công!'), 
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
           ),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Lỗi tải ảnh: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('❌ Lỗi tải bài: $e'), backgroundColor: Colors.red),
         );
+        _loadSubmissions(); // Tải lại để xóa các bản ghi lỗi
       }
     } finally {
-      setState(() {
-        _isUploading = false;
-      });
-      _loadSubmissions();
+      if (mounted) {
+        setState(() => _isUploading = false);
+      }
     }
   }
 
   void _confirmDelete(StudentSubmission sub) {
+    if (sub.id.startsWith('temp_')) return; // Không cho xóa khi đang upload
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -115,6 +160,8 @@ class _SubmissionManagementScreenState extends State<SubmissionManagementScreen>
   }
 
   void _showRenameDialog(StudentSubmission sub) {
+    if (sub.id.startsWith('temp_')) return;
+
     final controller = TextEditingController(text: sub.studentName);
     showDialog(
       context: context,
@@ -147,6 +194,8 @@ class _SubmissionManagementScreenState extends State<SubmissionManagementScreen>
   }
 
   Future<void> _showFullImage(StudentSubmission sub) async {
+    if (sub.id.startsWith('temp_')) return;
+
     // Show loading indicator
     showDialog(
       context: context, 
@@ -193,7 +242,7 @@ class _SubmissionManagementScreenState extends State<SubmissionManagementScreen>
         ),
       );
     } catch (e) {
-      Navigator.pop(context);
+      if (mounted) Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi: $e'), backgroundColor: Colors.red));
     }
   }
@@ -244,85 +293,88 @@ class _SubmissionManagementScreenState extends State<SubmissionManagementScreen>
           ),
           
           if (_isUploading)
-            const LinearProgressIndicator(),
+            const LinearProgressIndicator(minHeight: 2),
             
           Expanded(
-            child: FutureBuilder<List<StudentSubmission>>(
-              future: _submissionsFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final subs = snapshot.data ?? [];
-                
-                if (subs.isEmpty) {
-                  return Center(
+            child: _submissions == null 
+              ? const Center(child: CircularProgressIndicator())
+              : _submissions!.isEmpty 
+                ? Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         const Icon(Icons.search_off, size: 64, color: Colors.grey),
                         const SizedBox(height: 16),
                         const Text('Không tìm thấy bài làm nào.', style: TextStyle(color: Colors.grey)),
-                        const SizedBox(height: 24),
-                        if (_searchController.text.isEmpty)
+                        if (_searchController.text.isEmpty) ...[
+                          const SizedBox(height: 24),
                           ElevatedButton.icon(
                             onPressed: _isUploading ? null : _pickAndUploadImages,
                             icon: const Icon(Icons.add_photo_alternate),
                             label: const Text('TẢI BÀI LÀM LÊN'),
                           )
+                        ]
                       ],
                     ),
-                  );
-                }
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: _submissions!.length,
+                    separatorBuilder: (context, index) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final s = _submissions![index];
+                      final isTemp = s.id.startsWith('temp_');
 
-                return ListView.separated(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: subs.length,
-                  separatorBuilder: (context, index) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final s = subs[index];
-                    return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                      leading: Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: Colors.indigo.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(4),
+                      return ListTile(
+                        enabled: !isTemp,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                        leading: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: isTemp ? Colors.grey.shade200 : Colors.indigo.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: isTemp 
+                            ? const Padding(
+                                padding: EdgeInsets.all(8.0),
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.image, color: Colors.indigo),
                         ),
-                        child: const Icon(Icons.image, color: Colors.indigo),
-                      ),
-                      title: Text(
-                        s.studentName,
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      subtitle: Text(
-                        'Tải lên: ${s.createdAt.day.toString().padLeft(2, '0')}/${s.createdAt.month.toString().padLeft(2, '0')} ${s.createdAt.hour.toString().padLeft(2, '0')}:${s.createdAt.minute.toString().padLeft(2, '0')}',
-                        style: const TextStyle(fontSize: 11, color: Colors.grey),
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.edit_outlined, color: Colors.blue, size: 20),
-                            onPressed: () => _showRenameDialog(s),
-                            tooltip: 'Đổi tên / MSSV',
+                        title: Text(
+                          s.studentName,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold, 
+                            fontSize: 14,
+                            color: isTemp ? Colors.grey : Colors.black,
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
-                            onPressed: () => _confirmDelete(s),
-                            tooltip: 'Xóa bài làm',
-                          ),
-                        ],
-                      ),
-                      onTap: () => _showFullImage(s),
-                    );
-                  },
-                );
-              },
-            ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          isTemp ? 'Đang tải lên...' : 'Tải lên: ${s.createdAt.day.toString().padLeft(2, '0')}/${s.createdAt.month.toString().padLeft(2, '0')} ${s.createdAt.hour.toString().padLeft(2, '0')}:${s.createdAt.minute.toString().padLeft(2, '0')}',
+                          style: const TextStyle(fontSize: 11, color: Colors.grey),
+                        ),
+                        trailing: isTemp ? null : Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit_outlined, color: Colors.blue, size: 20),
+                              onPressed: () => _showRenameDialog(s),
+                              tooltip: 'Đổi tên / MSSV',
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                              onPressed: () => _confirmDelete(s),
+                              tooltip: 'Xóa bài làm',
+                            ),
+                          ],
+                        ),
+                        onTap: isTemp ? null : () => _showFullImage(s),
+                      );
+                    },
+                  ),
           ),
         ],
       ),

@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import '../models/question.dart';
 import '../services/database_api.dart';
 import 'barem_create_screen.dart';
+import '../widgets/latex_text_preview.dart';
 
 class QuestionDetailScreen extends StatefulWidget {
   final Question question;
@@ -151,7 +152,7 @@ class _QuestionDetailScreenState extends State<QuestionDetailScreen> {
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Colors.grey.shade300),
                 ),
-                child: _renderMixedText(_currentQuestion.content!),
+                child: LatexTextPreview(text: _currentQuestion.content!),
               ),
               const SizedBox(height: 24),
             ],
@@ -272,37 +273,13 @@ class _QuestionDetailScreenState extends State<QuestionDetailScreen> {
   }
 
   Widget _buildLatexCell(String latexCode) {
-    bool isLatex = latexCode.contains('\$');
     return TableCell(
       verticalAlignment: TableCellVerticalAlignment.middle,
       child: Padding(
         padding: const EdgeInsets.all(8.0),
-        child: isLatex
-            ? _renderMixedText(latexCode)
-            : Text(latexCode, style: const TextStyle(fontSize: 16)),
+        child: LatexTextPreview(text: latexCode),
       ),
     );
   }
 
-  Widget _renderMixedText(String input) {
-    List<Widget> spans = [];
-    final fragments = input.split('\$');
-    for (int i = 0; i < fragments.length; i++) {
-      if (i % 2 == 1) {
-        spans.add(Math.tex(
-          fragments[i],
-          textStyle: const TextStyle(fontSize: 18),
-          mathStyle: MathStyle.display,
-        ));
-      } else {
-        if (fragments[i].isNotEmpty) {
-          spans.add(Text(fragments[i], style: const TextStyle(fontSize: 16)));
-        }
-      }
-    }
-    return Wrap(
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: spans,
-    );
-  }
 }
