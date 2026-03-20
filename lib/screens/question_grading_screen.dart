@@ -274,7 +274,12 @@ class _QuestionGradingScreenState extends State<QuestionGradingScreen> {
   // --- VAULT FEATURES MERGED ---
 
   Future<void> _pickAndUploadImages() async {
-    final List<XFile> images = await _picker.pickMultiImage();
+    // Tự động nén ảnh xuống tối đa 1800px và chất lượng 85% để tránh lỗi dung lượng lớn
+    final List<XFile> images = await _picker.pickMultiImage(
+      maxWidth: 1800,
+      maxHeight: 1800,
+      imageQuality: 85,
+    );
     if (images.isEmpty) return;
 
     setState(() => _isUploading = true);

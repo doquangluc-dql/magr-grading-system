@@ -9,7 +9,8 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri);
@@ -50,9 +51,9 @@ async function addToGradingQueue(batchId, submissionIds, webhookUrl, commonMetad
       commonMetadata
     });
   }
-  
+
   console.log(`\x1b[35m[Queue]\x1b[0m Đã thêm ${submissionIds.length} bài vào hàng đợi. Tổng cộng: ${gradingQueue.length} bài.`);
-  
+
   if (!isProcessingQueue) {
     processGlobalQueue();
   }
@@ -87,7 +88,7 @@ async function processGlobalQueue() {
 
       const form = new FormData();
       const sessionMetadata = { ...commonMetadata, studentName: sub.studentName };
-      
+
       form.append('data', Buffer.from(JSON.stringify(sessionMetadata)), {
         filename: 'data.json',
         contentType: 'application/json'
@@ -96,7 +97,7 @@ async function processGlobalQueue() {
       let base64Str = sub.imageBase64 || "";
       if (base64Str.includes(',')) base64Str = base64Str.split(',')[1];
       const imageBuffer = Buffer.from(base64Str, 'base64');
-      
+
       form.append('studentImage', imageBuffer, {
         filename: `${sub.studentName}.jpg`,
         contentType: 'image/jpeg'
@@ -104,11 +105,11 @@ async function processGlobalQueue() {
 
       const response = await axios.post(webhookUrl, form, {
         headers: form.getHeaders(),
-        timeout: 120000 
+        timeout: 240000
       });
 
       const n8nData = response.data;
-      
+
       // Kiểm tra chặt chẽ: Phải có điểm số (score) từ n8n thì mới coi là thành công
       if (n8nData && (n8nData.status === 'success' || n8nData.score !== undefined)) {
         isSuccess = true;
@@ -135,7 +136,7 @@ async function processGlobalQueue() {
   } catch (error) {
     const errorMessage = error.response ? `N8N Error ${error.response.status}: ${JSON.stringify(error.response.data)}` : error.message;
     console.error(`    [XO] Lỗi chấm bài ${studentDisplayName}:`, errorMessage);
-    
+
     await sessionCol.updateOne(
       { batchId: batchId.toString(), studentName: studentDisplayName },
       {
@@ -151,10 +152,10 @@ async function processGlobalQueue() {
     // Cập nhật tiến độ Batch
     await batchCol.updateOne(
       { _id: new ObjectId(batchId) },
-      { 
-        $inc: { 
+      {
+        $inc: {
           completedItems: isSuccess ? 1 : 0,
-          failedItems: isSuccess ? 0 : 1 
+          failedItems: isSuccess ? 0 : 1
         },
         $set: { sheetUrl: batchSheetUrl }
       }
@@ -168,7 +169,7 @@ async function processGlobalQueue() {
         { $set: { status: 'Completed', updatedAt: new Date() } }
       );
       console.log(`\x1b[32m[Batch ${batchId}]\x1b[0m Đã hoàn thành toàn bộ đợt chấm.`);
-      
+
       // --- GỬI THÔNG BÁO HOÀN TẤT CHO GIÁO VIÊN (ĐỂ GỬI MAIL) ---
       try {
         const notifyUrl = webhookUrl.replace('magr-grading-webhook', 'magr-teacher-notification');
@@ -210,10 +211,10 @@ app.post('/api/grading/start-batch', async (req, res) => {
 
   try {
     const batchCol = db.collection('grading_batches');
-    
+
     // Automatic naming if empty
     let finalBatchName = (batchName || `${examTitle} - ${questionTitle}`).trim();
-    
+
     // Unique naming logic (incrementing numbers if name exists)
     let uniqueName = finalBatchName;
     let counter = 1;
@@ -234,13 +235,13 @@ app.post('/api/grading/start-batch', async (req, res) => {
       sheetUrl: metadata?.googleSheetId ? `https://docs.google.com/spreadsheets/d/${metadata.googleSheetId}` : null,
       createdAt: new Date()
     };
-    
+
     const batchResult = await batchCol.insertOne(batch);
     const batchId = batchResult.insertedId;
 
     // --- TỐI ƯU HÓA: LẤY TẤT CẢ SUBMISSIONS TRONG 1 LẦN ---
-    const subs = await db.collection('submissions').find({ 
-      _id: { $in: submissionIds.map(id => new ObjectId(id)) } 
+    const subs = await db.collection('submissions').find({
+      _id: { $in: submissionIds.map(id => new ObjectId(id)) }
     }).toArray();
 
     const pendingSessions = subs.map(sub => ({
@@ -282,9 +283,9 @@ app.post('/action/:action', async (req, res) => {
     // Handle $oid in filters/updates
     function processMongoJson(obj) {
       if (!obj || typeof obj !== 'object') return obj;
-      
+
       if (obj.$oid) return new ObjectId(obj.$oid);
-      
+
       for (const key in obj) {
         obj[key] = processMongoJson(obj[key]);
       }
