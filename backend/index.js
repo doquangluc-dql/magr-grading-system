@@ -87,7 +87,7 @@ async function processGlobalQueue() {
       console.log(`\x1b[33m[Processing]\x1b[0m [Batch ${batchId}] Đang chấm: ${studentDisplayName}... (${gradingQueue.length} bài còn lại)`);
 
       const form = new FormData();
-      const sessionMetadata = { ...commonMetadata, studentName: sub.studentName };
+      const sessionMetadata = { ...commonMetadata, studentName: sub.studentName, batchId: batchId.toString() };
 
       form.append('data', Buffer.from(JSON.stringify(sessionMetadata)), {
         filename: 'data.json',
