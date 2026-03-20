@@ -103,35 +103,49 @@ async function processGlobalQueue() {
         contentType: 'image/jpeg'
       });
 
+      // N8n dùng Respond Immediately nên thời gian chốt yêu cầu cực nhanh
       const response = await axios.post(webhookUrl, form, {
         headers: form.getHeaders(),
-        timeout: 240000
+        timeout: 20000 // Chỉ cho tối đa 20s để n8n xác nhận đã nhận đơn
       });
 
-      const n8nData = response.data;
-
-      // Kiểm tra chặt chẽ: Phải có điểm số (score) từ n8n thì mới coi là thành công
-      if (n8nData && (n8nData.status === 'success' || n8nData.score !== undefined)) {
-        isSuccess = true;
-        if (n8nData.sheetUrl) batchSheetUrl = n8nData.sheetUrl;
-      } else {
-        isSuccess = false;
-        console.warn(`    [n8n Response] Kết quả không hợp lệ hoặc thiếu điểm số:`, n8nData);
-      }
-
+      // 1. Phát tín hiệu cho App Flutter hiện chữ "Đang chấm..." và xoay xoay đẹp mắt
       await sessionCol.updateOne(
         { batchId: batchId.toString(), studentName: sub.studentName },
-        {
-          $set: {
-            n8nStatus: isSuccess ? 'Success' : 'Failed',
-            score: n8nData.score,
-            sheetUrl: n8nData.sheetUrl,
-            errorDetails: n8nData.error || (isSuccess ? null : "Lỗi từ n8n"),
-            gradingDetails: n8nData.gradingDetails || n8nData.details, // Lưu chi tiết chấm từ n8n
-            updatedAt: new Date()
-          }
-        }
+        { $set: { n8nStatus: 'Processing', errorDetails: null } }
       );
+
+      // 2. Node.js chuyển sang chế độ "Đứng Canh Cửa" (Polling DB)
+      // Chờ cục MongoDB Node trên n8n đâm lén kết quả vào sau 125s
+      let waitSeconds = 0;
+      const maxWaitSeconds = 300; // Phóng khoáng cho đợi tối đa 5 phút
+      let finalSession = null;
+
+      while (waitSeconds < maxWaitSeconds) {
+        await new Promise(resolve => setTimeout(resolve, 4000)); // 4 giây ngó nhà 1 lần
+        waitSeconds += 4;
+
+        finalSession = await sessionCol.findOne({ batchId: batchId.toString(), studentName: studentDisplayName });
+        
+        if (finalSession && finalSession.n8nStatus === 'Success') {
+           isSuccess = true;
+           // Nếu n8n có ghi sheetUrl thì kéo ra lưu vào batch để lúc nào xem
+           if (finalSession.sheetUrl) batchSheetUrl = finalSession.sheetUrl;
+           break;
+        }
+        if (finalSession && finalSession.n8nStatus === 'Failed') {
+           isSuccess = false;
+           break;
+        }
+      }
+
+      // 3. Nếu lố 5 phút mà n8n im re chưa điền điểm, đánh dấu là Lỗi
+      if (!isSuccess && (!finalSession || finalSession.n8nStatus === 'Processing')) {
+         await sessionCol.updateOne(
+           { batchId: batchId.toString(), studentName: studentDisplayName },
+           { $set: { n8nStatus: 'Failed', errorDetails: 'Chờ quá 5 phút n8n vẫn chưa chấm xong.' } }
+         );
+      }
     }
   } catch (error) {
     const errorMessage = error.response ? `N8N Error ${error.response.status}: ${JSON.stringify(error.response.data)}` : error.message;
