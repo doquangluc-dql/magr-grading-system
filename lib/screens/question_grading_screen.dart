@@ -118,34 +118,16 @@ class _QuestionGradingScreenState extends State<QuestionGradingScreen> {
         _isLoadingSubmissions = false;
       });
 
-      // Now start loading images in the background
-      _loadImagesInBackground();
+      // Đã tắt chế độ Call API ngầm _loadImagesInBackground() theo yêu cầu để load mượt màn hình hơn.
     } catch (e) {
       if (mounted) setState(() => _isLoadingSubmissions = false);
     }
   }
 
-  Future<void> _loadImagesInBackground() async {
-    // Only load images for items that are missing them
-    for (var item in _gradableItems) {
-      if (!mounted) return;
-      if (item.submission.imageBase64.isEmpty) {
-        try {
-          final fullSub = await DatabaseApi.getStudentSubmissionById(item.submission.id);
-          if (fullSub != null && mounted) {
-            setState(() {
-              // Update the submission object within the item
-              item.submission.imageBase64 = fullSub.imageBase64;
-            });
-          }
-        } catch (e) {
-          print("Error lazy loading image: $e");
-        }
-        // Small delay to avoid hammering the API too hard
-        await Future.delayed(const Duration(milliseconds: 50));
-      }
-    }
-  }
+  // Hàm tải ngầm nay đã bị vô hiệu hóa vì app chỉ cần ID, khi nào user bấm xem mới tải.
+  /* 
+  Future<void> _loadImagesInBackground() async { ... } 
+  */
 
   void _loadHistory({bool forceRefresh = false}) {
     setState(() {
@@ -587,26 +569,8 @@ class _QuestionGradingScreenState extends State<QuestionGradingScreen> {
                                           decoration: BoxDecoration(
                                             color: Colors.indigo.withOpacity(0.05),
                                             borderRadius: BorderRadius.circular(8),
-                                            border: Border.all(color: Colors.indigo.withOpacity(0.1)),
                                           ),
-                                          child: Stack(
-                                            alignment: Alignment.center,
-                                            children: [
-                                              if (item.submission.imageBase64.isNotEmpty)
-                                                ClipRRect(
-                                                  borderRadius: BorderRadius.circular(6),
-                                                  child: Image.memory(
-                                                    base64Decode(item.submission.imageBase64), 
-                                                    width: 40, height: 40, fit: BoxFit.cover
-                                                  ),
-                                                )
-                                              else
-                                                const SizedBox(
-                                                  width: 20, height: 20,
-                                                  child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.indigo),
-                                                ),
-                                            ],
-                                          ),
+                                          child: const Icon(Icons.image, color: Colors.indigo, size: 24),
                                         ),
                                       ],
                                     ),

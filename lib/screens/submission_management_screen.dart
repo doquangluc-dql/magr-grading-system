@@ -56,7 +56,12 @@ class _SubmissionManagementScreenState extends State<SubmissionManagementScreen>
   }
 
   Future<void> _pickAndUploadImages() async {
-    final List<XFile> images = await _picker.pickMultiImage();
+    // Tối ưu hóa: Nén ảnh và giảm kích thước ngay từ lúc chọn ảnh
+    final List<XFile> images = await _picker.pickMultiImage(
+      imageQuality: 50, // Nén ảnh xuống còn 50% chất lượng
+      maxWidth: 1800,   // Resize chiều ngang tối đa 1800px (đủ nét cho độ phân giải OCR)
+      maxHeight: 1800,
+    );
     if (images.isEmpty) return;
 
     if (_submissions == null) return;
